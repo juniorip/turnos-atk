@@ -42,7 +42,13 @@ export async function registrosATKUserRoster(): Promise<RegistrosATKUserRoster> 
       const inactiveUsernames = new Set((parsed.data.inactiveUsers || []).map((user) => user.username.trim().toLowerCase()));
       const activeUsernames = parsed.data.users
         ? new Set(parsed.data.users
-            .filter((user) => user.active !== false && !["inactive", "inactivo", "disabled", "desactivado"].includes((user.status || "").trim().toLowerCase()))
+            .filter((user) => {
+              const username = user.username.trim().toLowerCase();
+              const status = (user.status || "").trim().toLowerCase();
+              return user.active !== false
+                && !["inactive", "inactivo", "disabled", "desactivado", "baja", "cesado", "retirado", "desvinculado"].includes(status)
+                && !inactiveUsernames.has(username);
+            })
             .map((user) => user.username.trim().toLowerCase()))
         : null;
       if (activeUsernames || parsed.data.inactiveUsers) {

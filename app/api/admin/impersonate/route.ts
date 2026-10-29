@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { z } from "zod";
 import { actingAsCookieName, createActingAsToken, errorResponse, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { registrosATKUserRoster } from "@/lib/registros-atk-user-roster";
 
 const requestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("start"), workerId: z.number().int().positive() }),
@@ -21,8 +22,13 @@ export async function POST(request: Request) {
     }
 
     const admin = await requireUser(UserRole.ADMIN);
-    const worker = await prisma.user.findFirst({ where: { id: body.data.workerId, role: { in: [UserRole.WORKER, UserRole.MANAGER] }, active: true }, select: { id: true } });
+    const worker = await prisma.user.findFirst({ where: { id: body.data.workerId, role: { in: [UserRole.WORKER, UserRole.MANAGER] }, active: true }, select: { id: true, username: true } });
     if (!worker) return Response.json({ error: "No se encontró un colaborador activo." }, { status: 404 });
+    const roster = await registrosATKUserRoster();
+    const username = worker.username.trim().toLowerCase();
+    if (roster.activeUsernames ? !roster.activeUsernames.has(username) : roster.inactiveUsernames.has(username)) {
+      return Response.json({ error: "Este colaborador ya no está activo en Registros ATK." }, { status: 404 });
+    }
 
     const token = await createActingAsToken(admin.id, worker.id);
     cookieStore.set(actingAsCookieName, token, {

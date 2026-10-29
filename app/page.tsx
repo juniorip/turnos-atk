@@ -168,6 +168,43 @@ function StatusBadge({ status }: { status: string }) {
     </span>
   );
 }
+function PreviewWorkerPicker({ workers, value, disabled, onChange }: { workers: PreviewWorker[]; value: string; disabled: boolean; onChange: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const selected = workers.find((worker) => String(worker.id) === value);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!pickerRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return <div className="preview-worker-picker" ref={pickerRef}>
+    <button type="button" className="preview-worker-trigger" aria-label="Ver colaborador" aria-haspopup="listbox" aria-expanded={open} disabled={disabled} onClick={() => setOpen((current) => !current)}>
+      <span>{selected ? `${selected.name} · ${selected.branch?.name || "Sin sede"}` : "Ver colaborador…"}</span>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
+    </button>
+    {open && <div className="preview-worker-options" role="listbox" aria-label="Colaboradores activos">
+      {workers.length ? workers.map((worker) => {
+        const id = String(worker.id);
+        const isSelected = id === value;
+        return <button type="button" role="option" aria-selected={isSelected} className={`preview-worker-option${isSelected ? " selected" : ""}`} key={worker.id} onClick={() => { onChange(id); setOpen(false); }}>
+          <span>{worker.name}</span><small>{worker.branch?.name || "Sin sede"}</small>
+        </button>;
+      }) : <p className="preview-worker-empty">No hay colaboradores activos disponibles.</p>}
+    </div>}
+  </div>;
+}
 function ElapsedClock({ since, until }: { since: string; until?: string | null }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -890,10 +927,7 @@ export default function Home() {
     );
   const isPreviewMode = Boolean(data.previewMode);
   const isAdminSession = sessionRole === "ADMIN";
-  const previewSelector = isAdminSession ? <select className="view-as-select" aria-label="Ver pantalla de colaborador" disabled={previewSwitching} value={previewUserId} onChange={(event) => void changePreviewUser(event.target.value)}>
-    <option value="">Ver colaborador…</option>
-    {adminPreviewWorkers.map((worker) => <option value={worker.id} key={worker.id}>{worker.name} · {worker.branch?.name || "Sin sede"}</option>)}
-  </select> : null;
+  const previewSelector = isAdminSession ? <PreviewWorkerPicker workers={adminPreviewWorkers} disabled={previewSwitching} value={previewUserId} onChange={(id) => void changePreviewUser(id)} /> : null;
   const branchSelector = data.user.role === "ADMIN" && !isPreviewMode ? <select className="view-as-select admin-branch-select" aria-label="Sede que administra" disabled={adminBranchSwitching} value={adminBranchId} onChange={(event) => { setAdminBranchSwitching(true); setAdminBranchId(event.target.value); }}>
     <option value="">Todas las sedes</option>
     {data.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
