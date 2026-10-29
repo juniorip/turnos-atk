@@ -1,0 +1,36 @@
+{
+  "name": "turnos-atk",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "vercel-build": "prisma db push --skip-generate && next build",
+    "test": "node --test tests/*.test.cjs",
+    "start": "next start",
+    "postinstall": "prisma generate",
+    "db:push": "prisma db push",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:seed:local-demo": "tsx scripts/setup-local-demo.ts",
+    "dev:local": "node node_modules/@electric-sql/pglite-socket/dist/scripts/server.js --db=./.local-demo-db --port=5433 --max-connections=10 --run=\"pnpm dev\" --include-database-url"
+  },
+  "dependencies": {
+    "@elevenlabs/elevenlabs-js": "^2.74.0",
+    "@prisma/client": "^6.19.3",
+    "bcryptjs": "^3.0.3",
+    "jose": "^6.2.3",
+    "next": "16.2.6",
+    "prisma": "^6.19.3",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite-socket": "^0.2.15",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "tsx": "^4.20.6",
+    "typescript": "^5"
+  }
+}

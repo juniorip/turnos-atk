@@ -1,0 +1,189 @@
+/* Kiosco público: mismo azul noche que el sistema ATK. */
+:root {
+  --k-paper: #07111f;
+  --k-paper-2: #0a1a2d;
+  --k-ink: #f4f7fb;
+  --k-line: #24425f;
+  --k-muted: #8ea3bd;
+  --k-accent: #2583e9;
+  --k-accent-ink: #f4f7fb;
+}
+
+.public-page {
+  min-height: 100svh; display: grid; place-items: center; padding: 22px;
+  background: radial-gradient(720px 460px at 50% -10%, rgba(37, 131, 233, .22), transparent 70%), var(--k-paper); color: var(--k-ink); font-family: var(--font-body, "Inter", sans-serif);
+}
+.public-card {
+  width: min(100%, 490px); padding: 34px 30px; text-align: center;
+  background: #0d1b2a; border: 1px solid var(--k-line); border-radius: 18px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, .28);
+  position: relative;
+}
+.public-card::before {
+  content: ""; position: absolute; left: -11px; right: -11px; top: 50%; height: 0;
+  border-top: 2px dashed var(--k-line); z-index: -1; display: none;
+}
+.branch-chip {
+  display: inline-block; padding: 6px 12px; border-radius: 999px;
+  background: rgba(37, 131, 233, .16); color: #76b6ff; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.06em;
+}
+.public-card h1 { font-family: var(--font-display, "Space Grotesk", sans-serif); font-size: clamp(1.55rem, 6vw, 2.1rem); margin: 18px 0 8px; letter-spacing: -0.02em; }
+.public-card h2 { font-family: var(--font-display, "Space Grotesk", sans-serif); font-size: 1.2rem; margin: 25px 0 4px; }
+.public-card p { color: var(--k-muted); line-height: 1.5; }
+
+.public-label { display: grid; text-align: left; gap: 7px; margin-top: 15px; font-size: 0.86rem; font-weight: 700; color: #d9e8f9; }
+.public-label input {
+  border: 1px solid var(--k-line); border-radius: 12px; background: var(--k-paper-2);
+  color: var(--k-ink); padding: 14px; font-size: 1rem; outline: none;
+}
+.public-label input:focus { border-color: #4c9aff; box-shadow: 0 0 0 3px rgba(37, 131, 233, 0.18); }
+.public-page.keypad-open { place-items: start center; padding-top: 18px; padding-bottom: 330px; }
+.document-keypad {
+  position: fixed; z-index: 30; left: 50%; bottom: max(12px, env(safe-area-inset-bottom));
+  transform: translateX(-50%); width: min(420px, calc(100vw - 24px));
+  padding: 12px; border: 1px solid var(--k-line); border-radius: 14px;
+  background: #091727; box-shadow: 0 12px 28px rgba(0, 0, 0, .4);
+}
+.document-keypad-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.document-key {
+  min-height: 56px; border: 1px solid #315273; border-radius: 10px; background: #12263c;
+  color: var(--k-ink); font-size: 1.35rem; font-weight: 700; touch-action: manipulation;
+}
+.document-key:active { background: #1b3c5d; transform: scale(.98); }
+.document-key-action { font-size: .9rem; color: #a9bfda; }
+.document-key-done {
+  width: 100%; min-height: 48px; margin-top: 9px; border-radius: 10px;
+  background: var(--k-accent); color: var(--k-accent-ink); font-weight: 700; touch-action: manipulation;
+}
+@media (max-height: 560px) {
+  .document-key { min-height: 42px; }
+  .document-keypad { padding: 8px; }
+  .document-keypad-grid { gap: 6px; }
+  .document-key-done { min-height: 40px; margin-top: 6px; }
+}
+.public-error { margin: 14px 0; padding: 11px; border-radius: 10px; background: rgba(204, 55, 77, .16); border: 1px solid rgba(255, 104, 124, .38); color: #ffc2c8; font-size: 0.87rem; }
+
+.service-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 18px; }
+.service-card {
+  min-height: 112px; padding: 14px; background: var(--k-paper-2); border: 2px solid var(--k-line);
+  border-radius: 15px; color: var(--k-ink); transition: border-color 0.12s ease, transform 0.12s ease;
+}
+.service-card:hover { transform: translateY(-2px); }
+.service-card span, .service-preview span { display: block; font-size: 2rem; margin-bottom: 6px; }
+.service-card b { display: block; font-size: 0.88rem; }
+.registro { border-color: #54dfe0 !important; color: #70ecec !important; }
+.consulta { border-color: #57d881 !important; color: #72e99c !important; }
+.efectivo { border-color: #ffba45 !important; color: #ffca6e !important; }
+.deuda { border-color: #ff6b82 !important; color: #ff8fa0 !important; }
+.plan { border-color: #9d8cff !important; color: #b7aaff !important; }
+.public-time { margin-top: 23px; color: #8ea3bd; font-size: 0.82rem; }
+.back { float: left; padding: 6px 0 !important; background: transparent !important; color: var(--k-muted) !important; font-weight: 700 !important; }
+.service-confirm { padding-top: 24px; }
+.client-name { font-size: 1.1rem !important; color: var(--k-ink) !important; font-weight: 700 !important; }
+.service-preview { margin: 23px 0; padding: 25px; border: 2px solid var(--k-accent); border-radius: 18px; background: rgba(37, 131, 233, .1); }
+.service-preview b { font-size: 1.3rem; color: #82bdff; }
+
+.success-icon {
+  display: grid; place-items: center; width: 48px; height: 48px; margin: auto;
+  border-radius: 14px; background: #37d67a; color: #062719; font-size: 1.8rem; font-weight: 900;
+}
+.success-card h1 { color: #57e394; }
+.ticket-code {
+  margin: 24px auto; padding: 22px 10px; border: 2px dashed rgba(55, 214, 122, .7); border-radius: 19px;
+  background: rgba(55, 214, 122, .09); color: #57e394; font-family: var(--font-display, "Inter", sans-serif);
+  font-size: clamp(2.8rem, 15vw, 4.5rem); font-weight: 700; letter-spacing: 0.03em; font-variant-numeric: tabular-nums;
+}
+.wait-copy { margin-top: 25px; }
+.success-card small { display: block; color: #8ea3bd; margin: 10px 0 20px; }
+.public-card > button:not(.back), .service-confirm > button:last-child {
+  width: 100%; margin-top: 14px; background: var(--k-accent); color: var(--k-accent-ink); font-weight: 700;
+}
+.public-label select {
+  border: 1px solid var(--k-line); border-radius: 12px; background: var(--k-paper-2);
+  color: var(--k-ink); padding: 14px; font-size: 1rem; outline: none;
+}
+.public-label select:focus { border-color: var(--k-accent); }
+.public-lookup {
+  width: 100%; margin: 11px 0 0 !important; padding: 10px !important;
+  background: var(--k-paper-2) !important; color: var(--k-muted) !important; border: 1px solid var(--k-line) !important;
+}
+
+/* Compact kiosk layout inspired by the supplied tablet reference. */
+.public-page { padding: 12px; background: radial-gradient(440px 360px at 50% 5%, rgba(37, 131, 233, .22), transparent 72%), #07111f; }
+.public-card.kiosk-card { width: min(100%, 380px); padding: 16px 15px 12px; border-radius: 15px; border-color: rgba(64, 147, 238, .66); background: linear-gradient(155deg, rgba(13, 32, 57, .98), rgba(8, 22, 39, .99) 62%); box-shadow: 0 18px 55px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(136, 194, 255, .08); }
+.kiosk-card .branch-chip { padding: 5px 13px; background: linear-gradient(100deg, #164a94, #216fd0); color: #e8f4ff; font-size: .62rem; letter-spacing: .045em; }
+.public-card.kiosk-card h1 { margin: 10px 0 2px; font-size: clamp(1.35rem, 5.6vw, 1.65rem); line-height: 1.12; }
+.public-card.kiosk-card .kiosk-intro { margin: 0 0 10px; font-size: .68rem; }
+.kiosk-card .public-label { gap: 5px; margin-top: 8px; font-size: .7rem; }
+.kiosk-card .public-label select { min-height: 36px; padding: 7px 10px; border-radius: 9px; font-size: .76rem; }
+.kiosk-input-wrap { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 9px; border: 1px solid #3a638a; border-radius: 9px; background: rgba(5, 16, 30, .76); transition: border-color .15s ease, box-shadow .15s ease; }
+.kiosk-input-wrap:focus-within { border-color: #51a7ff; box-shadow: 0 0 0 2px rgba(37, 131, 233, .17); }
+.kiosk-input-wrap.validated { border-color: rgba(74, 222, 128, .7); }
+.kiosk-input-wrap.checking { border-color: rgba(255, 209, 102, .72); }
+.kiosk-field-icon { flex: 0 0 auto; color: #8bb8e4; font-size: .9rem; }
+.kiosk-field-icon svg { display: block; width: 15px; height: 15px; fill: currentColor; }
+.kiosk-input-wrap input { width: 100%; min-width: 0; min-height: 34px; padding: 5px 0; border: 0; border-radius: 0; outline: 0; background: transparent; color: #f1f7ff; font-size: .74rem; font-weight: 700; }
+.kiosk-input-wrap input:focus { border: 0; box-shadow: none; }
+.kiosk-input-wrap input::placeholder { color: #8198b3; font-size: .7rem; }
+.kiosk-valid-check { display: grid; place-items: center; flex: 0 0 15px; width: 15px; height: 15px; border-radius: 50%; background: #4ade94; color: #062a1d; font-size: .62rem; font-weight: 900; }
+.kiosk-valid-hint, .kiosk-status-hint { display: block; margin-top: 3px; color: #4ade94; font-size: .59rem; font-weight: 600; }
+.kiosk-status-hint { color: #ffd166; }
+.kiosk-name-wrap input { cursor: default; }
+.public-card.kiosk-card > .preferential-option { min-height: 49px; gap: 9px !important; margin-top: 10px; padding: 8px 10px; border-radius: 10px; }
+.public-card.kiosk-card > .preferential-option input[type="checkbox"] { flex: 0 0 16px; width: 16px; min-width: 16px; height: 16px; }
+.kiosk-card .preferential-access-icon { flex: 0 0 auto; color: #79c5ff !important; font-size: 1.45rem; line-height: 1; }
+.public-card.kiosk-card .preferential-copy strong { font-size: .7rem; }
+.public-card.kiosk-card .preferential-copy small { margin-top: 2px; font-size: .56rem; line-height: 1.3; }
+.public-card.kiosk-card .public-error { margin: 8px 0; padding: 8px; font-size: .72rem; }
+.kiosk-services { margin-top: 11px; }
+.public-card.kiosk-card .kiosk-services h2 { margin: 0 0 1px; font-size: 1rem; }
+.public-card.kiosk-card .kiosk-services > p { margin: 0; font-size: .68rem; }
+.kiosk-card .service-grid { gap: 8px; margin-top: 7px; }
+.kiosk-card .service-card { display: grid; grid-template-columns: 34px minmax(0, 1fr) 10px; align-items: center; gap: 8px; min-height: 61px; padding: 8px 9px; border-width: 1px; border-radius: 10px; background: linear-gradient(145deg, rgba(21, 42, 69, .96), rgba(8, 22, 39, .99)); text-align: left; }
+.kiosk-card .service-card > span:first-child { display: grid; place-items: center; width: 31px; height: 31px; margin: 0; border: 1px solid color-mix(in srgb, currentColor 28%, transparent); border-radius: 9px; background: color-mix(in srgb, currentColor 18%, transparent); color: inherit; font-size: 1.2rem; font-weight: 900; }
+.kiosk-card .service-card .service-card-copy { display: grid; gap: 2px; min-width: 0; }
+.kiosk-card .service-card b { font-size: .67rem; }
+.kiosk-card .service-card small { color: #c2d1e2; font-size: .54rem; font-weight: 500; line-height: 1.25; }
+.kiosk-card .service-card > i { color: #d8e9fa; font-size: 1.2rem; font-style: normal; text-align: center; }
+.kiosk-card .service-card.consulta { box-shadow: inset 0 0 14px rgba(74, 222, 128, .08); }
+.kiosk-card .service-card.efectivo { box-shadow: inset 0 0 14px rgba(255, 193, 65, .08); }
+.kiosk-card .service-card.deuda { box-shadow: inset 0 0 14px rgba(255, 104, 125, .08); }
+.kiosk-card .service-card.registro { box-shadow: inset 0 0 14px rgba(76, 154, 255, .08); }
+.public-card.kiosk-card .public-time { display: flex; justify-content: center; align-items: center; gap: 5px; min-height: 30px; margin-top: 10px; padding: 5px; border: 1px solid rgba(64, 147, 238, .38); border-radius: 8px; background: rgba(23, 49, 80, .42); font-size: .62rem; }
+.public-card.kiosk-card .public-time span { color: #9bcaff; font-size: .8rem; }
+.public-page.keypad-open { padding-top: 12px; }
+@media (max-width: 380px) { .public-card.kiosk-card { padding: 14px 12px 10px; } .kiosk-card .service-card { grid-template-columns: 29px minmax(0, 1fr) 9px; gap: 6px; min-height: 57px; padding: 7px; } .kiosk-card .service-card > span:first-child { width: 27px; height: 27px; } }
+@media (max-height: 760px) and (min-width: 381px) { .public-card.kiosk-card { padding-top: 12px; padding-bottom: 9px; } .public-card.kiosk-card h1 { margin-top: 7px; } .kiosk-card .public-label { margin-top: 6px; } .public-card.kiosk-card > .preferential-option { min-height: 44px; margin-top: 8px; } .kiosk-services { margin-top: 8px; } .kiosk-card .service-card { min-height: 56px; } .public-card.kiosk-card .public-time { min-height: 27px; margin-top: 7px; } }
+
+/* Larger typography and controls for comfortable tablet viewing. */
+.public-card.kiosk-card { width: min(100%, 460px); padding: 21px 20px 16px; }
+.kiosk-card .branch-chip { padding: 6px 15px; font-size: .72rem; }
+.public-card.kiosk-card h1 { margin: 12px 0 4px; font-size: clamp(1.65rem, 5.8vw, 1.9rem); }
+.public-card.kiosk-card .kiosk-intro { margin-bottom: 13px; font-size: .82rem; }
+.kiosk-card .public-label { gap: 6px; margin-top: 11px; font-size: .82rem; }
+.kiosk-card .public-label select { min-height: 44px; padding: 9px 11px; font-size: .9rem; }
+.kiosk-input-wrap { min-height: 44px; gap: 10px; padding: 0 11px; }
+.kiosk-input-wrap input { min-height: 42px; font-size: .9rem; }
+.kiosk-input-wrap input::placeholder { font-size: .82rem; }
+.kiosk-field-icon svg { width: 18px; height: 18px; }
+.kiosk-valid-check { flex-basis: 19px; width: 19px; height: 19px; font-size: .72rem; }
+.kiosk-valid-hint, .kiosk-status-hint { margin-top: 4px; font-size: .69rem; }
+.kiosk-card .service-grid { gap: 10px; margin-top: 9px; }
+.kiosk-card .service-card { grid-template-columns: 42px minmax(0, 1fr) 14px; gap: 10px; min-height: 76px; padding: 10px 12px; }
+.kiosk-card .service-card > span:first-child { width: 38px; height: 38px; border-radius: 11px; font-size: 1.45rem; }
+.kiosk-card .service-card b { font-size: .84rem; }
+.kiosk-card .service-card small { font-size: .68rem; line-height: 1.3; }
+.kiosk-card .service-card > i { font-size: 1.45rem; }
+.kiosk-services { margin-top: 14px; }
+.public-card.kiosk-card .kiosk-services h2 { font-size: 1.24rem; }
+.public-card.kiosk-card .kiosk-services > p { font-size: .82rem; }
+.public-card.kiosk-card .public-time { min-height: 38px; margin-top: 13px; font-size: .76rem; }
+.public-card.kiosk-card .public-time span { font-size: 1rem; }
+@media (max-width: 380px) { .public-card.kiosk-card { padding: 18px 14px 13px; } .kiosk-card .service-card { grid-template-columns: 36px minmax(0, 1fr) 12px; gap: 7px; min-height: 68px; padding: 8px; } .kiosk-card .service-card > span:first-child { width: 33px; height: 33px; } .kiosk-card .service-card b { font-size: .76rem; } .kiosk-card .service-card small { font-size: .62rem; } }
+@media (max-height: 760px) { .public-card.kiosk-card { padding-top: 16px; padding-bottom: 13px; } .public-card.kiosk-card h1 { margin-top: 9px; } .kiosk-card .public-label { margin-top: 8px; } .public-card.kiosk-card > .preferential-option { min-height: 58px; margin-top: 10px; } .kiosk-services { margin-top: 10px; } .kiosk-card .service-card { min-height: 66px; } .public-card.kiosk-card .public-time { min-height: 34px; margin-top: 9px; } }
+
+@media (max-width: 380px) {
+  .public-card { padding: 24px 18px; }
+  .service-grid { gap: 8px; }
+  .service-card { min-height: 98px; }
+}

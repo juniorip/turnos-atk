@@ -1,0 +1,6 @@
+.env*
+.local-pgdata/
+.vercel
+node_modules
+.next
+work/backups/

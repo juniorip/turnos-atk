@@ -1,0 +1,12 @@
+.effective-operation { grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); }
+.operation-preview {
+  grid-column: 1 / -1; margin: 0; padding: 9px 11px; border: 1px solid rgba(47, 191, 113, 0.35);
+  border-radius: var(--radius-sm); background: var(--ok-soft); color: #bdeed2; font-size: 0.8rem;
+}
+.operation-preview b { color: var(--ok); }
+@media (max-width: 720px) {
+  .effective-operation { grid-template-columns: 1fr 1fr; }
+  .effective-operation input { grid-column: auto; }
+  .effective-operation .small { grid-column: auto; }
+  .operation-preview { grid-column: 1 / -1; }
+}

@@ -1,0 +1,17 @@
+.env*
+!.env.example
+.vercel/
+node_modules/
+.next/
+*.tsbuildinfo
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+
+# Local database state and backups (not application source)
+.local-pgdata/
+.local-demo-db/
+work/backups/
+
+# Local secrets written by `elevenlabs onboard`
+/.env.local
