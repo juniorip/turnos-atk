@@ -305,12 +305,14 @@ export async function GET(request: Request) {
     const adminPreviewWorkers = user.role === UserRole.ADMIN || (previewMode && Boolean(user.adminId))
       ? await (async () => {
           const [workers, roster] = await Promise.all([
-            prisma.user.findMany({ where: { active: true, role: { in: [UserRole.WORKER, UserRole.MANAGER] } }, select: { id: true, name: true, username: true, role: true, moduleNumber: true, branch: { select: { name: true } } }, orderBy: { name: "asc" } }),
+            prisma.user.findMany({ where: { active: true, role: { in: [UserRole.WORKER, UserRole.MANAGER] } }, select: { id: true, name: true, username: true, dni: true, role: true, moduleNumber: true, branch: { select: { name: true } } }, orderBy: { name: "asc" } }),
             registrosATKUserRoster(),
           ]);
-          return workers.filter((worker) => roster.activeUsernames
-            ? roster.activeUsernames.has(worker.username.trim().toLowerCase())
-            : !roster.inactiveUsernames.has(worker.username.trim().toLowerCase()));
+          return workers.filter((worker) => {
+            const identities = [worker.username, worker.name, worker.dni].filter(Boolean).map((value) => value!.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/^@+/, ""));
+            if (roster.activeUsernames) return identities.some((identity) => roster.activeUsernames!.has(identity));
+            return false;
+          });
         })()
       : undefined;
     // Keep each advisor's own completed count in the team roster. Personal dashboard

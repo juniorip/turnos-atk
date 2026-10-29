@@ -4,11 +4,11 @@ const rosterEntrySchema = z.union([z.string(), z.record(z.string(), z.unknown())
 const rosterSchema = z.object({
   users: z.array(rosterEntrySchema).optional(),
   inactiveUsers: z.array(rosterEntrySchema).optional(),
-});
+}).passthrough();
 
-const identityFields = ["username", "userName", "login", "usuario", "email", "name", "nombre"];
-const statusFields = ["status", "estado", "userStatus"];
+const identityFields = ["username", "userName", "login", "usuario", "email", "name", "nombre", "dni", "document", "documentNumber", "documento"];
 const inactiveStatuses = new Set(["inactive", "inactivo", "disabled", "desactivado", "baja", "cesado", "retirado", "desvinculado"]);
+const inactiveValues = new Set<unknown>([false, 0, "false", "0", "no", ...inactiveStatuses]);
 
 function normalizeIdentity(value: string) {
   return value.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/^@+/, "");
@@ -24,10 +24,16 @@ function entryIdentities(entry: z.infer<typeof rosterEntrySchema>) {
 
 function entryIsActive(entry: z.infer<typeof rosterEntrySchema>) {
   if (typeof entry === "string") return true;
-  const active = entry.active ?? entry.isActive ?? entry.enabled ?? entry.isEnabled;
-  if (active === false || active === 0 || active === "false") return false;
-  const status = statusFields.map((field) => entry[field]).find((value) => typeof value === "string");
-  return typeof status !== "string" || !inactiveStatuses.has(normalizeIdentity(status));
+  return Object.entries(entry).every(([key, value]) => {
+    const normalized = typeof value === "string" ? normalizeIdentity(value) : "";
+    if (/(active|enabled|activo|habilitado)/i.test(key)) {
+      return !inactiveValues.has(normalized || value);
+    }
+    if (/(status|estado|situaci|condition)/i.test(key)) {
+      return !inactiveStatuses.has(normalized);
+    }
+    return true;
+  });
 }
 
 export type RegistrosATKUserRoster = {
@@ -60,7 +66,10 @@ export async function registrosATKUserRoster(): Promise<RegistrosATKUserRoster> 
       const parsed = rosterSchema.safeParse(await response.json());
       if (!parsed.success) return cachedRoster;
 
-      const inactiveUsernames = new Set((parsed.data.inactiveUsers || []).flatMap(entryIdentities));
+      const inactiveEntries = Object.entries(parsed.data)
+        .filter(([key, value]) => key !== "users" && /(inactive|inactivo|disabled|desactivado|cesado|retirado|desvinculado)/i.test(key) && Array.isArray(value))
+        .flatMap(([, value]) => value as z.infer<typeof rosterEntrySchema>[]);
+      const inactiveUsernames = new Set([...(parsed.data.inactiveUsers || []), ...inactiveEntries].flatMap(entryIdentities));
       const activeUsernames = parsed.data.users
         ? new Set(parsed.data.users
             .filter((user) => entryIsActive(user) && !entryIdentities(user).some((identity) => inactiveUsernames.has(identity)))
