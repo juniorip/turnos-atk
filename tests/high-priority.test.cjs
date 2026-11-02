@@ -8,15 +8,26 @@ const enums = require('@prisma/client');
 const fields = load('lib/user-fields.ts', {});
 const commission = load('lib/effectivizacion.ts', {});
 
-function load(file, dependencies, extras = {}) {
+function load(file, dependencies, extras = {}, includeShared = true) {
   const code = ts.transpileModule(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true, jsx: ts.JsxEmit.ReactJSX } }).outputText;
   const exports = {};
   vm.runInNewContext(code, { exports, require: name => {
     if (name in dependencies) return dependencies[name];
+    if (includeShared && name in sharedDependencies) return sharedDependencies[name];
     return require(name);
   }, Request, Response, URL, AbortSignal, process: { env: {} }, ...extras }, { filename: file });
   return exports;
 }
+const sharedDependencies = {
+  '@/lib/presence': load('lib/presence.ts', {}, {}, false),
+  '@/lib/queue-order': load('lib/queue-order.ts', {}, {}, false),
+  '@/lib/branch-overrides': load('lib/branch-overrides.ts', {}, {}, false),
+  '@/lib/lima-districts': load('lib/lima-districts.ts', {}, {}, false),
+  '@/lib/branches': { branchIdentity: value => value, coreBranches: [], ensureCoreBranches: async () => {}, findOrCreateBranch: async () => null },
+  '@/lib/large-room-schema': { ensureLargeRoomSchema: async () => {} },
+  '@/lib/registros-atk-user-roster': { registrosATKUserRoster: async () => [] },
+  './ticket-district-schema': { ensureTicketDistrictSchema: async () => {} },
+};
 const actor = { id: 1, role: 'MANAGER', branchId: 1 };
 const auth = { requireUser: async () => actor, errorResponse: () => Response.json({ error: 'error' }, { status: 500 }) };
 const request = body => new Request('http://local/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -48,7 +59,7 @@ test('manager can edit a permitted account and receives no credential fields', a
 test('ticket API requests only public user fields', async () => {
   let query;
   const handler = load('app/api/tickets/route.ts', { '@/lib/auth': auth, '@/lib/user-fields': fields, '@/lib/ticket': {}, '@/lib/prisma': { prisma: { ticket: { findMany: async args => { query = args; return []; } } } } });
-  assert.equal((await handler.GET()).status, 200);
+  assert.equal((await handler.GET(new Request('http://local/api/tickets'))).status, 200);
   assert.equal(query.include.assignedTo.select.passwordHash, undefined);
   assert.equal(query.include.assignedTo.select.name, true);
 });
@@ -67,7 +78,7 @@ function completionFixture(sync = async () => ({ synced: true })) {
     service: { findUnique: async ({ where }) => ({ id: 2, name: where.name, active: true }) },
     bank: { findUnique: async () => ({ id: 1, name: 'BCP', active: true }) },
     rate: { findUnique: async () => ({ rate: 10 }) },
-    operation: { create: async ({ data }) => { state.operations.push(data); return data; } },
+    operation: { create: async ({ data }) => { const created = { ...data, service: { name: data.serviceId === 2 ? 'Registro' : 'Consulta' }, bank: { name: 'BCP' } }; state.operations.push(created); return created; } },
     ticketHistory: { create: async ({ data }) => { state.history.push(data); return data; } },
   }) };
   const handler = load('app/api/tickets/[id]/complete/route.ts', { '@/lib/auth': auth, '@/lib/prisma': { prisma }, '@/lib/effectivizacion': commission, '@/lib/registros-atk': { sendToRegistrosAtK: async payload => { state.syncs++; return sync(payload); } } });
@@ -76,9 +87,11 @@ function completionFixture(sync = async () => ({ synced: true })) {
 
 test('simultaneous completions record one operation, one history and one sync', async () => {
   const { state, handler } = completionFixture();
-  const body = { successful: true, escalation: 'REGISTRO', operations: [{ bankId: 1, amount: 100 }] };
+  const body = { successful: true, registerClient: true, escalation: 'REGISTRO', operations: [{ bankId: 1, amount: 100 }] };
   const responses = await Promise.all([handler.POST(request(body), params), handler.POST(request(body), params)]);
   assert.deepEqual(responses.map(r => r.status).sort(), [200, 409]);
+  const payloads = await Promise.all(responses.map(response => response.clone().json()));
+  assert.equal(state.syncs, 1, JSON.stringify(payloads));
   assert.equal(state.operations.length, 1); assert.equal(state.history.length, 1); assert.equal(state.syncs, 1);
   assert.equal(state.operations[0].serviceId, 2, 'Registration escalation uses the effective service');
 });
@@ -94,7 +107,7 @@ test('failed tickets reject operations and do not record escalation or synchroni
 
 test('external network failure returns committed local success with integration failure', async () => {
   const { state, handler } = completionFixture(async () => { throw new Error('network'); });
-  const response = await handler.POST(request({ successful: true, escalation: 'REGISTRO', operations: [] }), params);
+  const response = await handler.POST(request({ successful: true, registerClient: true, escalation: 'REGISTRO', operations: [] }), params);
   assert.equal(response.status, 200); assert.equal(state.ticket.status, 'COMPLETED');
   assert.equal((await response.json()).integration.synced, false);
   assert.equal((await handler.POST(request({ successful: true, operations: [] }), params)).status, 409);
@@ -136,9 +149,9 @@ test('concurrent ticket creation shares the branch lock and reserves unique code
 
 test('disabled local account cannot fall back to external authentication', async () => {
   let externalCalls = 0;
-  const handler = load('app/api/auth/login/route.ts', { '@/lib/prisma': { prisma: { user: { findUnique: async () => ({ active: false }) } } }, '@/lib/auth': { createSession: async () => { throw new Error('must not create a session'); } } }, { fetch: async () => { externalCalls++; throw new Error('must not request external authentication'); } });
+  const handler = load('app/api/auth/login/route.ts', { '@/lib/prisma': { prisma: { user: { findUnique: async () => ({ active: false }) } } }, '@/lib/auth': { createSession: async () => { throw new Error('must not create a session'); } } }, { process: { env: { REGISTROS_ATK_URL: 'http://external' } }, fetch: async () => { externalCalls++; return Response.json({ currentUser: { username: 'disabled', name: 'Disabled', sede: 'Sur' } }); } });
   assert.equal((await handler.POST(request({ username: 'disabled', password: 'test-password' }))).status, 401);
-  assert.equal(externalCalls, 0);
+  assert.equal(externalCalls, 1);
 });
 
 test('external login preserves local role, branch, service permissions and pause', async () => {
@@ -147,20 +160,23 @@ test('external login preserves local role, branch, service permissions and pause
   const handler = load('app/api/auth/login/route.ts', {
     '@/lib/prisma': { prisma: { user: {
       findUnique: async () => ({ ...user }),
-      update: async ({ data }) => { writes.push(data); Object.assign(user, data); return { ...user }; },
+      update: async ({ data }) => { writes.push(data); Object.assign(user, Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined))); return { ...user }; },
     } } },
     '@/lib/auth': { createSession: async (value, hash) => { session = value; assert.equal(hash, user.passwordHash); return 'test-token'; } },
+    '@/lib/branches': { findOrCreateBranch: async () => ({ id: 1 }) },
   }, { process: { env: { REGISTROS_ATK_URL: 'http://external', NODE_ENV: 'production' } }, fetch: async () => Response.json({ currentUser: { username: 'worker', name: 'External Worker', role: 'ADMIN', sede: 'Sur' } }) });
   const response = await handler.POST(request({ username: 'worker', password: 'external-password' }));
   assert.equal(response.status, 200); assert.equal(session.role, 'WORKER'); assert.equal(session.branchId, 1);
   assert.equal(user.availability, 'PAUSED');
-  assert.ok(writes.every(data => !('active' in data) && !('role' in data) && !('branchId' in data)));
+  assert.ok(writes.every(data => !('active' in data) && !('role' in data) && !('services' in data) && !('serviceIds' in data)));
+  assert.ok(writes.some(data => data.branchId === 1));
+  assert.ok(writes.every(data => data.branchId === undefined || data.branchId === 1));
   assert.ok(response.headers.get('Set-Cookie').includes('; Secure'));
 });
 
 test('commercial totals and conversions exclude failed historical tickets', async () => {
   const tickets = ['COMPLETED', 'FAILED'].map((status, i) => ({
-    id: i + 1, status, assignedToId: 1, serviceId: 1, dni: String(i), service: { name: 'Consulta' },
+    id: i + 1, status, assignedToId: 1, serviceId: 1, branchId: 1, branch: { id: 1, name: 'Lince' }, dni: String(i), service: { name: 'Consulta' },
     notes: '[escalado:EFECTIVIZACION]', arrivedAt: new Date(), startedAt: null, completedAt: new Date(),
     operations: [{ ticketId: i + 1, amount: (i + 1) * 100, profit: (i + 1) * 10, service: { name: 'Efectivización' } }],
   }));
@@ -168,7 +184,7 @@ test('commercial totals and conversions exclude failed historical tickets', asyn
     '@/lib/auth': { ...auth, requireUser: async () => ({ id: 1, role: 'ADMIN', branchId: null }) },
     '@/lib/prisma': { prisma: {
       ticket: { count: async () => 0, findMany: async () => tickets }, branch: { findMany: async () => [] },
-      service: { findMany: async () => [{ id: 1, name: 'Consulta' }] }, bank: { findMany: async () => [] },
+      service: { findMany: async () => [{ id: 1, name: 'Consulta' }] }, bank: { findMany: async () => [], upsert: async () => ({}) },
       user: { findMany: async () => [{ id: 1, name: 'Worker', services: [] }] },
     } },
   });
@@ -182,7 +198,7 @@ test('commercial totals and conversions exclude failed historical tickets', asyn
 
 function componentFixture(file, fetch) {
   let cursor = 0, pending = [];
-  const hooks = [], intervals = [];
+  const hooks = [], intervals = [], timers = [];
   const changed = (before, after) => !before || before.length !== after.length || after.some((item, i) => !Object.is(item, before[i]));
   const react = {
     useState(initial) { const id = cursor++; if (!(id in hooks)) hooks[id] = typeof initial === 'function' ? initial() : initial; return [hooks[id], next => { hooks[id] = typeof next === 'function' ? next(hooks[id]) : next; }]; },
@@ -192,11 +208,13 @@ function componentFixture(file, fetch) {
   };
   const jsx = (type, props) => ({ type, props });
   const component = load(file, { react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'fragment' }, 'next/navigation': { useParams: () => ({ sede: 'LIN' }) }, '@/lib/effectivizacion': commission }, {
-    fetch, setInterval: fn => { intervals.push(fn); return intervals.length; }, clearInterval() {}, setTimeout: () => 1, clearTimeout() {}, URLSearchParams,
+    fetch, setInterval: fn => { intervals.push(fn); return intervals.length; }, clearInterval() {}, setTimeout: fn => { timers.push(fn); return timers.length; }, clearTimeout() {}, URLSearchParams,
+    document: { addEventListener() {}, removeEventListener() {} },
+    window: { setInterval: fn => { intervals.push(fn); return intervals.length; }, clearInterval() {}, setTimeout: fn => { timers.push(fn); return timers.length; }, clearTimeout() {}, addEventListener() {}, removeEventListener() {}, sessionStorage: { getItem: () => '1', setItem() {}, removeItem() {} }, localStorage: { getItem: () => null, setItem() {}, removeItem() {} } },
   }).default;
   function render() { cursor = 0; const tree = component(); const effects = pending; pending = []; effects.forEach(effect => effect()); return tree; }
-  async function settle() { await new Promise(resolve => setImmediate(resolve)); render(); return render(); }
-  return { render, settle, intervals };
+  async function settle() { for (let i = 0; i < 5; i++) { await new Promise(resolve => setImmediate(resolve)); render(); } return render(); }
+  return { render, settle, intervals, timers };
 }
 function nodes(tree) {
   if (!tree || typeof tree !== 'object') return [];
@@ -214,15 +232,17 @@ test('public document lookup ignores stale names and submits the matching docume
     throw new Error('Unexpected request: ' + url);
   });
   let tree = fixture.render(); tree = await fixture.settle();
-  node(tree, n => n.type === 'input' && n.props.inputMode === 'numeric').props.onChange({ target: { value: '11111111' } });
+  node(tree, n => n.type === 'input' && n.props.placeholder === 'Ingresa tu DNI').props.onChange({ target: { value: '11111111' } });
   fixture.render();
   tree = fixture.render();
-  node(tree, n => n.type === 'input' && n.props.inputMode === 'numeric').props.onChange({ target: { value: '22222222' } });
+  node(tree, n => n.type === 'input' && n.props.placeholder === 'Ingresa tu DNI').props.onChange({ target: { value: '22222222' } });
   fixture.render();
   lookups.get('11111111')(Response.json({ fullName: 'Wrong Person' })); tree = await fixture.settle();
-  assert.notEqual(node(tree, n => n.type === 'input' && n.props.readOnly).props.value, 'Wrong Person');
+  assert.notEqual(node(tree, n => n.type === 'input' && n.props.placeholder === 'Se completará automáticamente').props.value, 'Wrong Person');
   lookups.get('22222222')(Response.json({ fullName: 'Correct Person' })); tree = await fixture.settle();
-  assert.equal(node(tree, n => n.type === 'input' && n.props.readOnly).props.value, 'Correct Person');
+  assert.equal(node(tree, n => n.type === 'input' && n.props.placeholder === 'Se completará automáticamente').props.value, 'Correct Person');
+  node(tree, n => n.type === 'button' && n.props.className === 'public-district-trigger').props.onClick(); tree = fixture.render();
+  node(tree, n => n.type === 'button' && n.props.role === 'option' && n.props.children === 'Lince').props.onClick(); tree = fixture.render();
   node(tree, n => n.type === 'button' && n.props.className?.startsWith('service-card')).props.onClick(); tree = fixture.render();
   await node(tree, n => n.type === 'button' && n.props.children === 'Confirmar y generar ticket').props.onClick();
   assert.equal(submitted.dni, '22222222'); assert.equal(submitted.clientName, 'Correct Person');
@@ -241,9 +261,13 @@ test('automatic current-ticket changes clear drafts and absent active tickets cl
   node(tree, n => n.type === 'input' && n.props.placeholder === 'Monto S/').props.onChange({ target: { value: '100' } }); tree = fixture.render();
   assert.equal(node(tree, n => n.type === 'input' && n.props.placeholder === 'Monto S/').props.value, '100');
   active = { ...active, id: 43, code: 'EFEC-002' };
-  await fixture.intervals[0](); tree = await fixture.settle();
+  node(tree, n => n.type === 'button' && JSON.stringify(n.props.children).includes('Inicio')).props.onClick(); tree = fixture.render();
+  node(tree, n => n.type === 'button' && JSON.stringify(n.props.children).includes('Mi cola')).props.onClick(); tree = fixture.render();
+  tree = await fixture.settle();
+  const runTimers = async () => { const queued = fixture.timers.splice(0); await Promise.all(queued.map(timer => timer())); tree = await fixture.settle(); };
+  await runTimers();
   assert.equal(nodes(tree).filter(n => n.type === 'input' && n.props.placeholder === 'Monto S/').length, 0);
   active = null;
-  await fixture.intervals[0](); tree = await fixture.settle();
+  await runTimers();
   node(tree, n => n.type === 'h2' && n.props.children === 'Sin atención activa');
 });
