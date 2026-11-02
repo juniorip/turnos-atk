@@ -354,6 +354,7 @@ nav {
 .password-toggle:hover { color: #eaf4ff; background: transparent; }
 .password-toggle svg { width: 20px; height: 20px; }
 .login-submit { min-height: 49px; margin-top: 2px; border-radius: 10px; background: linear-gradient(100deg, #06b6ce, #2864ed); color: #fff; font-weight: 800; box-shadow: 0 8px 24px rgba(24, 114, 226, .22); transition: filter .18s ease, transform .18s ease; }
+.unified-login-link { display: grid; place-items: center; padding: 0 14px; text-decoration: none; }
 .login-submit:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px); }
 .login-forgot { display: block; margin: 19px auto 0; padding: 4px 8px; border: 0; background: transparent; color: #20c0d0; font-size: .84rem; cursor: pointer; }
 .login-forgot:hover { background: transparent; color: #8cecf3; text-decoration: underline; }

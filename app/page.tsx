@@ -1020,48 +1020,9 @@ export default function Home() {
             <p>Sistema de tickets</p>
           </div>
           <section className="login-card">
-            <h2>Inicia sesión</h2>
-            <p className="login-intro">Ingresa con tu usuario y contraseña para continuar.</p>
-            <form onSubmit={login}>
-              <label>
-                Usuario
-                <input name="username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" placeholder="Ingresa tu usuario" required />
-              </label>
-              <label className="remember-username">
-                <input type="checkbox" checked={rememberUsername} onChange={(event) => setRememberUsername(event.target.checked)} />
-                <span>Recordar solo mi usuario</span>
-              </label>
-              <label>
-                Contraseña
-                <span className="password-wrap">
-                  <input
-                    name="password"
-                    type={showPassword ? "text" : "password"}
-                    autoComplete="current-password"
-                    placeholder="Ingresa tu contraseña"
-                    required
-                  />
-                  <button
-                    type="button"
-                    className="password-toggle"
-                    aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
-                    title={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
-                    onClick={() => setShowPassword((visible) => !visible)}
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" />
-                      <circle cx="12" cy="12" r="3" />
-                      {showPassword && <path d="m3 3 18 18" />}
-                    </svg>
-                  </button>
-                </span>
-              </label>
-              <button className="login-submit" disabled={loading}>
-                {loading ? "Ingresando…" : "Iniciar sesión"}
-              </button>
-            </form>
-            <button type="button" className="login-forgot" onClick={() => setLoginHelp("Para recuperar tu contraseña, comunícate con el administrador de Registros ATK.")}>¿Olvidaste tu contraseña?</button>
-            {loginHelp && <p className="login-help" role="status">{loginHelp}</p>}
+            <h2>Acceso a sistemas</h2>
+            <p className="login-intro">Inicia sesión una sola vez con tu usuario de Registros ATK y luego elige Turnos o Registros.</p>
+            <a className="login-submit unified-login-link" href="/api/auth/portal">Continuar al inicio unificado</a>
             {message && <p className="notice error">{message}</p>}
           </section>
         </div>
