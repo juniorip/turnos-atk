@@ -584,25 +584,41 @@ export default function Home() {
     let stopped = false;
     let timer: number | undefined;
     const poll = async () => {
-      try { await refresh(); } catch { /* refresh reports recoverable errors in the UI */ }
-      if (!stopped) timer = window.setTimeout(poll, 15_000);
+      if (!document.hidden) {
+        try { await refresh(); } catch { /* refresh reports recoverable errors in the UI */ }
+      }
+      if (!stopped) timer = window.setTimeout(poll, 30_000);
     };
     // The dashboard aggregates historical and financial data, so refresh it
-    // less often than the live queue to avoid overloading the database.
+    // less often than the live queue to avoid overloading the database. Hidden
+    // tabs pause polling and refresh as soon as the advisor returns.
+    const onVisibilityChange = () => {
+      if (!document.hidden) void refresh();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
     void poll();
-    return () => { stopped = true; if (timer !== undefined) window.clearTimeout(timer); };
+    return () => {
+      stopped = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, [refresh]);
   useEffect(() => {
     let stopped = false;
     let timer: number | undefined;
     const poll = async () => {
-      await refreshLiveTickets();
-      if (!stopped) timer = window.setTimeout(poll, 3000);
+      if (!document.hidden) await refreshLiveTickets();
+      if (!stopped) timer = window.setTimeout(poll, 5000);
     };
+    const onVisibilityChange = () => {
+      if (!document.hidden) void refreshLiveTickets();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
     void poll();
     return () => {
       stopped = true;
       ++ticketRefreshGeneration.current;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [refreshLiveTickets]);

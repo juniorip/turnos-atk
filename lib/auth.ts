@@ -58,5 +58,20 @@ export async function requireUser(...roles: UserRole[]) {
   return user;
 }
 export function errorResponse(error: unknown) {
-  return Response.json({ error: error instanceof Error && error.message === "UNAUTHORIZED" ? "No autorizado." : "No se pudo procesar la solicitud." }, { status: error instanceof Error && error.message === "UNAUTHORIZED" ? 401 : 500 });
+  const unauthorized = error instanceof Error && error.message === "UNAUTHORIZED";
+  if (!unauthorized) {
+    // Keep diagnostics useful without logging query text, client data, or secrets.
+    const candidate = error && typeof error === "object" ? error as { name?: unknown; code?: unknown } : {};
+    const code = typeof candidate.code === "string" && /^P\d{4}$/.test(candidate.code) ? candidate.code : undefined;
+    console.error("[api] request failed", {
+      name: typeof candidate.name === "string" ? candidate.name : "UnknownError",
+      ...(code ? { code } : {}),
+    });
+    const temporarilyUnavailable = ["P1001", "P1002", "P1008", "P1017", "P2024"].includes(code || "");
+    return Response.json(
+      { error: temporarilyUnavailable ? "El servicio está temporalmente ocupado. Inténtalo nuevamente en unos segundos." : "No se pudo procesar la solicitud." },
+      { status: temporarilyUnavailable ? 503 : 500 },
+    );
+  }
+  return Response.json({ error: "No autorizado." }, { status: 401 });
 }
