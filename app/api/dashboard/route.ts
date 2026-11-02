@@ -5,6 +5,7 @@ import { isRecentlyActive } from "@/lib/presence";
 import { ensureLargeRoomSchema } from "@/lib/large-room-schema";
 import { registrosATKUserRoster } from "@/lib/registros-atk-user-roster";
 import { ensureCoreBranches } from "@/lib/branches";
+import { sortTicketsForCall } from "@/lib/queue-order";
 
 const average = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
 const volume = (items: { amount: number }[]) => items.reduce((total, item) => total + Number(item.amount), 0);
@@ -104,9 +105,12 @@ export async function GET(request: Request) {
       ...(isIndividualWorker ? { assignedToId: user.id } : workerId ? { assignedToId: workerId } : {}),
       ...(serviceId ? { serviceId } : {}),
     };
+    const liveQueueScope: Prisma.TicketWhereInput = user.role === UserRole.ADMIN
+      ? (branchId ? { branchId } : {})
+      : { branchId: user.branchId ?? -1 };
     const historical = { ...scope, arrivedAt: { gte: from, lte: now } };
     const todayStart = getRange("today").from;
-    const [waiting, inService, tickets, branches, services, banks, workers, activeTickets, workerHistory, advisorActiveTickets, advisorCompletedToday, userBranch] = await Promise.all([
+    const [waiting, inService, tickets, branches, services, banks, workers, activeTickets, workerHistory, advisorActiveTickets, advisorCompletedToday, userBranch, liveTickets] = await Promise.all([
       prisma.ticket.count({ where: { ...scope, status: TicketStatus.WAITING } }),
       prisma.ticket.count({ where: { ...scope, status: TicketStatus.IN_SERVICE } }),
       prisma.ticket.findMany({ where: historical, include: { service: true, branch: { select: { id: true, name: true } }, assignedTo: { select: { name: true } }, operations: { include: { service: true, bank: { select: { name: true } } } } }, orderBy: { arrivedAt: "desc" } }),
@@ -133,7 +137,9 @@ export async function GET(request: Request) {
         ? prisma.ticket.findMany({ where: { branchId: user.branchId, status: TicketStatus.COMPLETED, completedAt: { gte: todayStart, lte: now } }, select: { assignedToId: true } })
         : Promise.resolve([]),
       user.branchId ? prisma.branch.findUnique({ where: { id: user.branchId }, select: { name: true } }) : Promise.resolve(null),
+      prisma.ticket.findMany({ where: { ...liveQueueScope, status: { in: [TicketStatus.WAITING, TicketStatus.CALLED, TicketStatus.IN_SERVICE] } }, include: { service: true, branch: { select: { id: true, name: true } }, assignedTo: { select: { name: true, moduleNumber: true } } } }),
     ]);
+    const sortedLiveTickets = sortTicketsForCall(liveTickets);
     // The worker home is a daily personal view. Count attentions by their
     // completion date, and bank activity by the date each operation was saved.
     const workerTodayOperations = isIndividualWorker
@@ -318,7 +324,7 @@ export async function GET(request: Request) {
     // Keep each advisor's own completed count in the team roster. Personal dashboard
     // metrics remain scoped to the signed-in worker; this is only the shared roster.
     const visibleAdvisorPresence = advisorPresenceWithRoom;
-    return Response.json({ user: { id: user.id, name: user.name, role: user.role, branchId: user.branchId, branchName: userBranch?.name || null, canSelectWaitingTicket, availability: workerPresence?.availability || null, moduleNumber: workerPresence?.moduleNumber || null }, selectedBranchId: user.role === UserRole.ADMIN ? branchId ?? null : null, previewMode, adminPreviewWorkers, largeRoom, advisorPresence: visibleAdvisorPresence, period, range: { from, to: now }, activeTicket: activeTickets[0] || null, activeTickets, workerHistory, workerTodayOperations: workerTodayOperations.map((operation) => ({ id: operation.id, amount: operation.amount, profit: operation.profit, createdAt: operation.createdAt, service: operation.service })), branches, services, banks, workers: isIndividualWorker ? workers.filter((worker) => worker.id === user.id) : workers, stats: { waiting, inService, completed: isIndividualWorker ? personalDayCompleted : completed.length, failed: isIndividualWorker ? personalDayFailed : failed.length, cancelled: isIndividualWorker ? personalDayCancelled : cancelled.length, totalAmount: isIndividualWorker ? personalDayVolume : totalAmount, totalProfit: isIndividualWorker ? personalDayProfit : totalProfit, totalTickets: isIndividualWorker ? waiting + inService + personalDayHistory.length : tickets.length, ownToday: isIndividualWorker ? personalDayCompleted : tickets.filter(ticket => ticket.assignedToId === user.id && ticket.status === TicketStatus.COMPLETED).length, avgTicket: completed.length ? totalAmount / completed.length : 0, avgProfit: completed.length ? totalProfit / completed.length : 0, avgWait: average(waits), avgAttention: average(attentions) }, workerPerformance: isIndividualWorker ? workerPerformance.filter((worker) => worker.id === user.id) : workerPerformance, servicesDistribution, commercial, bankPerformance, incompleteByService, hourlyDemand, branchPerformance, conversions, trend, quality });
+    return Response.json({ user: { id: user.id, name: user.name, role: user.role, branchId: user.branchId, branchName: userBranch?.name || null, canSelectWaitingTicket, availability: workerPresence?.availability || null, moduleNumber: workerPresence?.moduleNumber || null }, selectedBranchId: user.role === UserRole.ADMIN ? branchId ?? null : null, previewMode, adminPreviewWorkers, largeRoom, advisorPresence: visibleAdvisorPresence, period, range: { from, to: now }, activeTicket: activeTickets[0] || null, activeTickets, liveTickets: sortedLiveTickets, workerHistory, workerTodayOperations: workerTodayOperations.map((operation) => ({ id: operation.id, amount: operation.amount, profit: operation.profit, createdAt: operation.createdAt, service: operation.service })), branches, services, banks, workers: isIndividualWorker ? workers.filter((worker) => worker.id === user.id) : workers, stats: { waiting, inService, completed: isIndividualWorker ? personalDayCompleted : completed.length, failed: isIndividualWorker ? personalDayFailed : failed.length, cancelled: isIndividualWorker ? personalDayCancelled : cancelled.length, totalAmount: isIndividualWorker ? personalDayVolume : totalAmount, totalProfit: isIndividualWorker ? personalDayProfit : totalProfit, totalTickets: isIndividualWorker ? waiting + inService + personalDayHistory.length : tickets.length, ownToday: isIndividualWorker ? personalDayCompleted : tickets.filter(ticket => ticket.assignedToId === user.id && ticket.status === TicketStatus.COMPLETED).length, avgTicket: completed.length ? totalAmount / completed.length : 0, avgProfit: completed.length ? totalProfit / completed.length : 0, avgWait: average(waits), avgAttention: average(attentions) }, workerPerformance: isIndividualWorker ? workerPerformance.filter((worker) => worker.id === user.id) : workerPerformance, servicesDistribution, commercial, bankPerformance, incompleteByService, hourlyDemand, branchPerformance, conversions, trend, quality });
   } catch (error) { return errorResponse(error); }
 }
 

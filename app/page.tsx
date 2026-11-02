@@ -1,6 +1,6 @@
 "use client";
 import { ChangeEvent, FormEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
-import { effectivizacionCommission } from "@/lib/effectivizacion";
+import { debtCommission, effectivizacionCommission, MIN_DEBT_COMMISSION } from "@/lib/effectivizacion";
 import { LIMA_DISTRICTS } from "@/lib/lima-districts";
 type PreviewWorker = { id: number; name: string; role: string; moduleNumber: number | null; branch?: { name: string } | null };
 type BranchComparisonData = {
@@ -16,6 +16,8 @@ type DistrictOriginsData = {
   districts: { district: string; count: number; percentage: number }[];
   branches: { branchId: number; branchName: string; total: number; reported: number; withoutDistrict: number; topDistrict: string | null; topCount: number; topPercentage: number; districts: { district: string; count: number; percentage: number }[] }[];
 };
+const TAB_AUTH_KEY = "turnos_atk_tab_authenticated";
+const REMEMBERED_USERNAME_KEY = "turnos_atk_remembered_username";
 type Data = {
   selectedBranchId?: number | null;
   user: { id: number; name: string; role: string; branchId: number | null; branchName?: string | null; moduleNumber?: number | null; availability?: "AVAILABLE" | "PAUSED" | null; canSelectWaitingTicket?: boolean };
@@ -65,6 +67,7 @@ type Data = {
   quality: { failed: number; cancelled: number; incomplete: number; failedRate: number; escalated: number; recurringClients: number };
   activeTicket?: Ticket | null;
   activeTickets?: Ticket[];
+  liveTickets?: Ticket[];
   previewMode?: boolean;
   advisorPresence?: { id: number; name: string; moduleNumber: number | null; status: "FREE" | "OCCUPIED" | "UNAVAILABLE"; attentionsToday: number; inLargeRoom?: boolean }[];
   largeRoom?: { branchName: string; active: boolean; isMine: boolean; advisorName: string | null; activeCount: number } | null;
@@ -205,6 +208,47 @@ function PreviewWorkerPicker({ workers, value, disabled, onChange }: { workers: 
     </div>}
   </div>;
 }
+function DistrictPicker({ name, districts }: { name: string; districts: readonly string[] }) {
+  const [value, setValue] = useState("");
+  const [open, setOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!pickerRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    const form = pickerRef.current?.closest("form");
+    const clearOnFormReset = () => setValue("");
+    form?.addEventListener("reset", clearOnFormReset);
+    return () => form?.removeEventListener("reset", clearOnFormReset);
+  }, []);
+
+  return <div className="district-picker" ref={pickerRef}>
+    <input type="hidden" name={name} value={value} />
+    <button type="button" className="district-picker-trigger" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((current) => !current)}>
+      <span>{value || "Selecciona tu distrito"}</span>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
+    </button>
+    {open && <div className="district-picker-menu" role="listbox" aria-label="Distritos de Lima">
+      {districts.map((district) => <button type="button" role="option" aria-selected={value === district} className={value === district ? "selected" : ""} key={district} onClick={() => { setValue(district); setOpen(false); }}>
+        {district}
+      </button>)}
+    </div>}
+  </div>;
+}
 function ElapsedClock({ since, until }: { since: string; until?: string | null }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -282,6 +326,9 @@ function AdvisorModulePicker({ moduleNumber, onChanged }: { moduleNumber: number
 }
 export default function Home() {
   const refreshGeneration = useRef(0);
+  const refreshInFlight = useRef(false);
+  const ticketRefreshGeneration = useRef(0);
+  const ticketRefreshInFlight = useRef(false);
   const documentGeneration = useRef(0);
   const verifiedDocument = useRef<string | null>(null);
   const knownWaitingTicketIds = useRef<Set<number> | null>(null);
@@ -290,6 +337,8 @@ export default function Home() {
   const [browserNotifications, setBrowserNotifications] = useState(false);
   const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [username, setUsername] = useState("");
+  const [rememberUsername, setRememberUsername] = useState(false);
   const [loginHelp, setLoginHelp] = useState("");
   const [newTicketNotice, setNewTicketNotice] = useState<Ticket | null>(null);
   const [newTicketNoticeClosing, setNewTicketNoticeClosing] = useState(false);
@@ -326,6 +375,14 @@ export default function Home() {
   const [adminPreviewWorkers, setAdminPreviewWorkers] = useState<NonNullable<Data["workers"]>>([]);
   const [adminBranchSwitching, setAdminBranchSwitching] = useState(false);
   const hasSession = Boolean(data);
+
+  useEffect(() => {
+    const rememberedUsername = window.localStorage.getItem(REMEMBERED_USERNAME_KEY);
+    if (rememberedUsername) {
+      setUsername(rememberedUsername);
+      setRememberUsername(true);
+    }
+  }, []);
 
   useEffect(() => {
     if (!message || !data) return;
@@ -406,6 +463,19 @@ export default function Home() {
   }
 
   const refresh = useCallback(async () => {
+    // A session cookie is shared by every tab. Require an explicit login in
+    // each tab while letting a reload in that same tab keep its session.
+    if (window.sessionStorage.getItem(TAB_AUTH_KEY) !== "1") {
+      setData(null);
+      setCurrent(null);
+      setActiveTickets([]);
+      setTickets([]);
+      setSessionReady(true);
+      return false;
+    }
+    if (refreshInFlight.current) return false;
+    refreshInFlight.current = true;
+    try {
     const generation = ++refreshGeneration.current;
     const isSummarySection = section === "summary";
     const range = new URLSearchParams({ period: isSummarySection ? "today" : period });
@@ -414,7 +484,7 @@ export default function Home() {
     if (!isSummarySection && rangeTo) range.set("to", rangeTo);
     let response: Response;
     try {
-      response = await fetch(`/api/dashboard?${range}`, { cache: "no-store" });
+      response = await fetch(`/api/dashboard?${range}`, { cache: "no-store", signal: AbortSignal.timeout(25_000) });
     } catch {
       if (generation === refreshGeneration.current) {
         setAdminBranchSwitching(false);
@@ -425,6 +495,7 @@ export default function Home() {
     if (generation !== refreshGeneration.current) return false;
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) {
+        window.sessionStorage.removeItem(TAB_AUTH_KEY);
         setData(null);
         setCurrent(null);
         setActiveTickets([]);
@@ -448,44 +519,61 @@ export default function Home() {
       if (next.user.role === "ADMIN") setAdminPreviewWorkers(next.adminPreviewWorkers || (next.workers || []).filter((worker: NonNullable<Data["workers"]>[number]) => worker.role === "WORKER" || worker.role === "MANAGER"));
     }
     setData(next);
+    setTickets((next.liveTickets || []) as Ticket[]);
     const nextActive = (next.activeTickets || (next.activeTicket ? [next.activeTicket] : [])) as Ticket[];
     setActiveTickets(nextActive);
     setCurrent((previous) => nextActive.find((ticket) => ticket.id === previous?.id) || nextActive[0] || null);
-    const ticketQuery = new URLSearchParams();
-    if (next.user.role === "ADMIN" && adminBranchId) ticketQuery.set("branchId", adminBranchId);
-    const ticketUrl = `/api/tickets${ticketQuery.size ? `?${ticketQuery}` : ""}`;
-    const queue = await fetch(ticketUrl, { cache: "no-store" }).catch(() => null);
-    if (queue?.ok) {
-      const result = await queue.json();
-      if (generation === refreshGeneration.current) {
-        const nextTickets = result.tickets as Ticket[];
-        const canReceiveSound = !next.previewMode && ["WORKER", "MANAGER"].includes(next.user.role);
-        const waitingIds = new Set(nextTickets.filter((ticket) => ticket.status === "WAITING").map((ticket) => ticket.id));
-        const previousIds = knownWaitingTicketIds.current;
-        const newWaiting = canReceiveSound && previousIds
-          ? nextTickets.filter((ticket) => ticket.status === "WAITING" && !previousIds.has(ticket.id))
-          : [];
-        if (newWaiting.length) {
-          const newest = newWaiting[0];
-          playNewTicketSound();
-          setNewTicketNotice(newest);
-          if (browserNotifications && Notification.permission === "granted" && (document.visibilityState !== "visible" || !document.hasFocus())) {
-            const extra = newWaiting.length > 1 ? " y " + (newWaiting.length - 1) + " más" : "";
-            const notification = new Notification("Nuevo ticket por atender", {
-              body: newest.code + " · " + newest.clientName + " · " + newest.service.name + extra,
-              tag: "turnos-ticket-" + newest.id,
-              icon: "/icons/turnos-192.png?v=20261019",
-            });
-            notification.onclick = () => { window.focus(); setSection("queue"); notification.close(); };
-          }
-        }
-        knownWaitingTicketIds.current = canReceiveSound ? waitingIds : null;
-        setTickets(nextTickets);
-      }
-    }
     if (generation === refreshGeneration.current) setAdminBranchSwitching(false);
     return true;
+    } finally {
+      refreshInFlight.current = false;
+    }
   }, [period, rangeFrom, rangeTo, browserNotifications, adminBranchId, section]);
+  const refreshLiveTickets = useCallback(async () => {
+    if (window.sessionStorage.getItem(TAB_AUTH_KEY) !== "1") return false;
+    if (ticketRefreshInFlight.current) return false;
+    ticketRefreshInFlight.current = true;
+    const generation = ++ticketRefreshGeneration.current;
+    try {
+      const query = new URLSearchParams();
+      if (data?.user.role === "ADMIN" && adminBranchId) query.set("branchId", adminBranchId);
+      const response = await fetch(`/api/tickets${query.size ? `?${query}` : ""}`, { cache: "no-store", signal: AbortSignal.timeout(10_000) });
+      if (!response.ok) return false;
+      const result = await response.json();
+      if (generation !== ticketRefreshGeneration.current) return false;
+      const nextTickets = (result.tickets || []) as Ticket[];
+      // If the dashboard's same-scope count says clients are waiting, don't let
+      // a mismatched secondary response erase the authoritative live list.
+      if (nextTickets.length === 0 && (data?.stats.waiting || 0) > 0) return false;
+      const canReceiveSound = !data?.previewMode && ["WORKER", "MANAGER"].includes(data?.user.role || "");
+      const waitingIds = new Set(nextTickets.filter((ticket) => ticket.status === "WAITING").map((ticket) => ticket.id));
+      const previousIds = knownWaitingTicketIds.current;
+      const newWaiting = canReceiveSound && previousIds
+        ? nextTickets.filter((ticket) => ticket.status === "WAITING" && !previousIds.has(ticket.id))
+        : [];
+      if (newWaiting.length) {
+        const newest = newWaiting[0];
+        playNewTicketSound();
+        setNewTicketNotice(newest);
+        if (browserNotifications && Notification.permission === "granted" && (document.visibilityState !== "visible" || !document.hasFocus())) {
+          const extra = newWaiting.length > 1 ? " y " + (newWaiting.length - 1) + " más" : "";
+          const notification = new Notification("Nuevo ticket por atender", {
+            body: newest.code + " · " + newest.clientName + " · " + newest.service.name + extra,
+            tag: "turnos-ticket-" + newest.id,
+            icon: "/icons/turnos-192.png?v=20261019",
+          });
+          notification.onclick = () => { window.focus(); setSection("queue"); notification.close(); };
+        }
+      }
+      knownWaitingTicketIds.current = canReceiveSound ? waitingIds : null;
+      setTickets(nextTickets);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      ticketRefreshInFlight.current = false;
+    }
+  }, [adminBranchId, browserNotifications, data?.previewMode, data?.stats.waiting, data?.user.role]);
   useEffect(() => {
     setOperations([]);
     setEscalation(null);
@@ -493,10 +581,31 @@ export default function Home() {
     setUploadPlatform("WEB");
   }, [current?.id]);
   useEffect(() => {
-    refresh();
-    const i = setInterval(refresh, 8000);
-    return () => clearInterval(i);
+    let stopped = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      try { await refresh(); } catch { /* refresh reports recoverable errors in the UI */ }
+      if (!stopped) timer = window.setTimeout(poll, 15_000);
+    };
+    // The dashboard aggregates historical and financial data, so refresh it
+    // less often than the live queue to avoid overloading the database.
+    void poll();
+    return () => { stopped = true; if (timer !== undefined) window.clearTimeout(timer); };
   }, [refresh]);
+  useEffect(() => {
+    let stopped = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      await refreshLiveTickets();
+      if (!stopped) timer = window.setTimeout(poll, 3000);
+    };
+    void poll();
+    return () => {
+      stopped = true;
+      ++ticketRefreshGeneration.current;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [refreshLiveTickets]);
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
@@ -519,6 +628,9 @@ export default function Home() {
         );
         return;
       }
+      window.sessionStorage.setItem(TAB_AUTH_KEY, "1");
+      if (rememberUsername) window.localStorage.setItem(REMEMBERED_USERNAME_KEY, String(f.get("username") || "").trim());
+      else window.localStorage.removeItem(REMEMBERED_USERNAME_KEY);
       setSessionReady(false);
       await refresh();
     } catch {
@@ -569,6 +681,10 @@ export default function Home() {
     setLoading(true);
     try {
       const f = new FormData(form);
+      if (!f.get("district")) {
+        setMessage("Selecciona el distrito de procedencia del cliente.");
+        return;
+      }
       if (verifiedDocument.current !== `${f.get("documentType") || "DNI"}:${f.get("dni")}`) {
         setMessage("Consulta el documento actual antes de generar el ticket.");
         return;
@@ -789,13 +905,19 @@ export default function Home() {
       if (status === "FAILED") {
         ++refreshGeneration.current;
         setActiveTickets((previous) => previous.filter((ticket) => ticket.id !== current.id));
+        setTickets((previous) => previous.filter((ticket) => ticket.id !== current.id));
         setCurrent(null);
         setMessage(`${current.code} fue marcado como fallido por inasistencia.`);
       } else {
+        // Discard any in-flight refresh that still has the ticket as CALLED,
+        // then move it out of the queue immediately after the server confirms.
+        ++refreshGeneration.current;
         setCurrent(json.ticket);
+        setActiveTickets((previous) => previous.map((ticket) => ticket.id === json.ticket.id ? json.ticket : ticket));
+        setTickets((previous) => previous.filter((ticket) => ticket.id !== json.ticket.id));
         setMessage(`${current.code} ya está en atención.`);
       }
-      refresh();
+      void refresh();
     } catch {
       setMessage("No se pudo conectar al actualizar el llamado.");
     } finally {
@@ -887,7 +1009,11 @@ export default function Home() {
             <form onSubmit={login}>
               <label>
                 Usuario
-                <input name="username" autoComplete="username" placeholder="Ingresa tu usuario" required />
+                <input name="username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" placeholder="Ingresa tu usuario" required />
+              </label>
+              <label className="remember-username">
+                <input type="checkbox" checked={rememberUsername} onChange={(event) => setRememberUsername(event.target.checked)} />
+                <span>Recordar solo mi usuario</span>
               </label>
               <label>
                 Contraseña
@@ -1115,6 +1241,7 @@ export default function Home() {
           className="side-link logout"
           onClick={async () => {
             ++refreshGeneration.current;
+              window.sessionStorage.removeItem(TAB_AUTH_KEY);
               await fetch("/api/auth/logout", { method: "POST" });
               ++refreshGeneration.current;
             setData(null);
@@ -1218,6 +1345,7 @@ export default function Home() {
             className="ghost mobile-logout"
             onClick={async () => {
               ++refreshGeneration.current;
+              window.sessionStorage.removeItem(TAB_AUTH_KEY);
               await fetch("/api/auth/logout", { method: "POST" });
               ++refreshGeneration.current;
               setData(null);
@@ -1311,12 +1439,9 @@ export default function Home() {
                   Nombre completo
                   <input name="clientName" readOnly required />
                 </label>
-                <label>
+                <label className="district-field">
                   Distrito de procedencia
-                  <select name="district" defaultValue="" required>
-                    <option value="" disabled>Selecciona tu distrito</option>
-                    {LIMA_DISTRICTS.map((district) => <option value={district} key={district}>{district}</option>)}
-                  </select>
+                  <DistrictPicker name="district" districts={LIMA_DISTRICTS} />
                 </label>
                 <label className="preferential-option full"><input type="checkbox" name="isPreferential" /><span>Atención preferencial<small>Se llamará antes de los turnos regulares pendientes.</small></span></label>
                 <label>
@@ -1501,7 +1626,7 @@ export default function Home() {
                         <h3>Operaciones realizadas</h3>
                       </div>
                       <div className="inline-actions operation-actions">
-                        {(isEfectivizacion || isDebt) && <button type="button" className="ghost small" aria-pressed={registrationRequested} onClick={() => setRegistrationRequested((value) => !value)}>{registrationRequested ? "✓ Cliente se registrará" : "Registrar cliente"}</button>}
+                        {(isEfectivizacion || isDebt) && <button type="button" className={`registration-state-toggle${registrationRequested ? " is-active" : ""}`} aria-pressed={registrationRequested} onClick={() => setRegistrationRequested((value) => !value)}><span className="registration-state-light" aria-hidden="true" />{registrationRequested ? "Registro activo · se enviará al finalizar" : "Activar registro del cliente"}</button>}
                         <button
                           type="button"
                           className="ghost"
@@ -1609,7 +1734,7 @@ export default function Home() {
                             }
                           >
                             {[1, 1.5, 2, 2.5].map((rate) => (
-                              <option value={rate} key={rate}>{rate}% comisión</option>
+                              <option value={rate} key={rate}>{rate}% comisión · mín. S/ {MIN_DEBT_COMMISSION}</option>
                             ))}
                           </select>
                         )}
@@ -1669,7 +1794,7 @@ export default function Home() {
                         </button>
                         {rowIsDebt && Number(op.amount) > 0 && (
                           <p className="operation-preview">
-                            Comisión: <b>{money((Number(op.amount) * Number(op.debtRate)) / 100)}</b> · Volumen neto: <b>{money(Number(op.amount) * (1 - Number(op.debtRate) / 100))}</b> · Utilidad: <b>{money((Number(op.amount) * Number(op.debtRate)) / 100)}</b>
+                            Comisión: <b>{money(debtCommission(Number(op.amount), Number(op.debtRate)))}</b> · Volumen neto: <b>{money(Math.max(0, Number(op.amount) - debtCommission(Number(op.amount), Number(op.debtRate))))}</b> · Utilidad: <b>{money(debtCommission(Number(op.amount), Number(op.debtRate)))}</b>
                           </p>
                         )}
                       </div>;
@@ -1956,6 +2081,8 @@ function WorkerHistory({ tickets, banks, onChanged, managerMode = false, initial
   const todayKey = limaDateKey(new Date());
   const [selectedId, setSelectedId] = useState<number | null>(initialSelectedId);
   const [drafts, setDrafts] = useState<OperationDraft[]>([]);
+  const [editingOperationId, setEditingOperationId] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState<OperationDraft | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [dateFrom, setDateFrom] = useState(todayKey);
@@ -1996,6 +2123,57 @@ function WorkerHistory({ tickets, banks, onChanged, managerMode = false, initial
   }
   function updateDraft(index: number, update: Partial<OperationDraft>) {
     setDrafts((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, ...update } : row));
+  }
+  function editOperation(operation: any) {
+    const serviceName: OperationDraft["serviceName"] = operation.service.name === "Pago de deuda" ? "Pago de deuda" : "Efectivización";
+    const bankName = operation.bank?.name || "";
+    const rate = Number(operation.rate);
+    const commissionPlan: OperationDraft["commissionPlan"] = bankName === "Interbank"
+      ? rate === 2 ? "INTERBANK_2" : "INTERBANK_1_5"
+      : rate === 0.35 ? "ATK_0_35" : rate === 0.5 ? "ATK_0_5" : "ATK_1";
+    setEditingOperationId(operation.id);
+    setEditDraft({
+      serviceName,
+      bankId: operation.bank?.id || null,
+      amount: (Number(operation.amount) + Number(operation.profit)).toFixed(2),
+      commissionPlan,
+      settlementTiming: ["BanBif", "Scotiabank"].includes(bankName) && rate === 1.5 ? "SAME_DAY" : "NEXT_BUSINESS_DAY",
+      debtRate: String(rate || 1),
+      commercialChannel: operation.commercialChannel === "PAYMENT_LINK" ? "PAYMENT_LINK" : operation.commercialChannel === "POS" ? "POS" : null,
+    });
+    setError("");
+  }
+  function stopEditingOperation() {
+    setEditingOperationId(null);
+    setEditDraft(null);
+    setError("");
+  }
+  async function saveEditedOperation() {
+    if (!selected || !editDraft || editingOperationId === null || busy) return;
+    const amount = Number(editDraft.amount);
+    if (!editDraft.bankId || !Number.isFinite(amount) || amount <= 0) {
+      setError("Completa el banco y un monto válido para guardar los cambios.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/tickets/${selected.id}/operations/${editingOperationId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...editDraft, amount, debtRate: Number(editDraft.debtRate) }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) { setError(result.error || "No se pudo actualizar la operación."); return; }
+      stopEditingOperation();
+      await onChanged(`Operación de ${selected.code} actualizada; sus totales e indicadores ya reflejan el cambio.`);
+      if (managerMode) setSelectedId(null);
+      else await loadHistoryRange(appliedRange.from, appliedRange.to);
+    } catch {
+      setError("No se pudo conectar para actualizar la operación.");
+    } finally {
+      setBusy(false);
+    }
   }
   async function loadHistoryRange(from: string, to: string) {
     const response = await fetch(`/api/worker/history?${new URLSearchParams({ from, to })}`, { cache: "no-store" });
@@ -2144,11 +2322,43 @@ function WorkerHistory({ tickets, banks, onChanged, managerMode = false, initial
                 {selected.operations.length ? <div className="ticket-operation-list">{selected.operations.map((operation: any) => {
                   const hasNetAmount = operationServiceNames.has(operation.service.name);
                   const gross = Number(operation.amount) + Number(operation.profit);
+                  if (editingOperationId === operation.id && editDraft) {
+                    const editBanks = allowedBanks(editDraft.serviceName);
+                    const editBank = editBanks.find((candidate) => candidate.id === editDraft.bankId);
+                    const editAmount = Number(editDraft.amount);
+                    let editCommission = 0;
+                    if (editAmount > 0 && editBank) {
+                      if (editDraft.serviceName === "Efectivización") {
+                        try { editCommission = effectivizacionCommission(editBank.name, editAmount, editDraft.commissionPlan, editDraft.settlementTiming).profit; } catch { editCommission = 0; }
+                      } else editCommission = debtCommission(editAmount, Number(editDraft.debtRate));
+                    }
+                    return <article className="ticket-operation-item ticket-operation-edit" key={operation.id}>
+                      <div className="ticket-operation-edit-fields">
+                        <select aria-label="Tipo de operación" value={editDraft.serviceName} onChange={(event) => {
+                          const serviceName = event.target.value as OperationDraft["serviceName"];
+                          const firstBank = allowedBanks(serviceName)[0];
+                          setEditDraft({ ...editDraft, serviceName, bankId: firstBank?.id || null, commercialChannel: null, commissionPlan: firstBank?.name === "Interbank" ? "INTERBANK_1_5" : "ATK_1" });
+                        }}><option value="Efectivización">Efectivización</option><option value="Pago de deuda">Pago de deuda</option></select>
+                        <BankSelect ariaLabel="Banco de la operación" banks={editBanks} value={editDraft.bankId} placeholder="Selecciona banco" onChange={(bankId) => {
+                          const nextBank = editBanks.find((candidate) => candidate.id === bankId);
+                          setEditDraft({ ...editDraft, bankId, commercialChannel: nextBank?.name === "Tarjeta Comercial" ? editDraft.commercialChannel || "POS" : null, commissionPlan: nextBank?.name === "Interbank" ? "INTERBANK_1_5" : editDraft.commissionPlan.startsWith("INTERBANK_") ? "ATK_1" : editDraft.commissionPlan });
+                        }} />
+                        {editDraft.serviceName === "Efectivización" && editBank?.name === "Tarjeta Comercial" && <select aria-label="Canal de Tarjeta Comercial" value={editDraft.commercialChannel || "POS"} onChange={(event) => setEditDraft({ ...editDraft, commercialChannel: event.target.value as "POS" | "PAYMENT_LINK" })}><option value="POS">POS</option><option value="PAYMENT_LINK">Link de pago</option></select>}
+                        {editDraft.serviceName === "Efectivización" && editBank?.name !== "CMR" && editBank?.name !== "IO" && editBank?.name !== "Tarjeta Comercial" && <select aria-label="Plan de comisión" value={editDraft.commissionPlan} onChange={(event) => setEditDraft({ ...editDraft, commissionPlan: event.target.value as OperationDraft["commissionPlan"] })}>{commissionPlans.filter((plan) => plan.id.startsWith("INTERBANK_") === (editBank?.name === "Interbank")).map((plan) => <option key={plan.id} value={plan.id}>{plan.label}</option>)}</select>}
+                        {editDraft.serviceName === "Pago de deuda" && <select aria-label="Comisión de pago de deuda" value={editDraft.debtRate} onChange={(event) => setEditDraft({ ...editDraft, debtRate: event.target.value })}>{[1, 1.5, 2, 2.5].map((rate) => <option key={rate} value={rate}>{rate}% comisión · mín. S/ {MIN_DEBT_COMMISSION}</option>)}</select>}
+                        {editDraft.serviceName === "Efectivización" && ["BanBif", "Scotiabank"].includes(editBank?.name || "") && <select aria-label="Tiempo de abono" value={editDraft.settlementTiming} onChange={(event) => setEditDraft({ ...editDraft, settlementTiming: event.target.value as OperationDraft["settlementTiming"] })}>{settlementTimings.map((timing) => <option key={timing.id} value={timing.id}>{timing.label}</option>)}</select>}
+                        <label>Monto bruto S/<input type="number" min="0.01" step="0.01" value={editDraft.amount} onChange={(event) => setEditDraft({ ...editDraft, amount: event.target.value })} /></label>
+                      </div>
+                      {editAmount > 0 && <p className="operation-preview">Comisión/utilidad: <b>{money(editCommission)}</b> · Neto: <b>{money(Math.max(0, editAmount - editCommission))}</b></p>}
+                      <div className="ticket-operation-edit-actions"><button type="button" className="ghost small" onClick={stopEditingOperation} disabled={busy}>Cancelar</button><button type="button" className="small" onClick={() => void saveEditedOperation()} disabled={busy}>{busy ? "Guardando…" : "Guardar cambios"}</button></div>
+                    </article>;
+                  }
                   return <article className="ticket-operation-item" key={operation.id}>
                     <div><b>{operation.service.name}</b><span><BankBrand name={operation.bank?.name || "Sin banco"} /> {operation.commercialChannel ? `· ${operation.commercialChannel === "PAYMENT_LINK" ? "Link de pago" : "POS"}` : ""} {Number(operation.rate) ? `· ${Number(operation.rate)}%` : "· Comisión fija"}</span><small>{new Date(operation.createdAt).toLocaleString("es-PE", { dateStyle: "short", timeStyle: "short" })}</small></div>
                     <div><span>{hasNetAmount ? "Monto bruto" : "Monto"}</span><b>{money(hasNetAmount ? gross : Number(operation.amount))}</b></div>
                     {hasNetAmount && <div><span>Volumen neto</span><b>{money(Number(operation.amount))}</b></div>}
                     <div><span>Comisión / utilidad</span><b>{money(Number(operation.profit))}</b></div>
+                    <button type="button" className="ghost small ticket-operation-edit-button" onClick={() => editOperation(operation)} disabled={busy}>Editar</button>
                   </article>;
                 })}</div> : <p className="operation-note">Este ticket no tiene operaciones registradas.</p>}
               </section>
@@ -2164,7 +2374,7 @@ function WorkerHistory({ tickets, banks, onChanged, managerMode = false, initial
                   let commission = 0;
                   if (draft.serviceName === "Efectivización" && bank && amount > 0) {
                     try { commission = effectivizacionCommission(bank.name, amount, draft.commissionPlan, draft.settlementTiming).profit; } catch { commission = 0; }
-                  } else if (draft.serviceName === "Pago de deuda" && amount > 0) commission = amount * Number(draft.debtRate) / 100;
+                  } else if (draft.serviceName === "Pago de deuda" && amount > 0) commission = debtCommission(amount, Number(draft.debtRate));
                   return <div className="operation-row history-operation-row" key={index}>
                     <select aria-label={`Tipo de operación nueva ${index + 1}`} value={draft.serviceName} onChange={(event) => {
                       const serviceName = event.target.value as OperationDraft["serviceName"];
@@ -2177,7 +2387,7 @@ function WorkerHistory({ tickets, banks, onChanged, managerMode = false, initial
                     }} />
                     {draft.serviceName === "Efectivización" && bank?.name === "Tarjeta Comercial" && <select aria-label={`Canal de Tarjeta Comercial ${index + 1}`} value={draft.commercialChannel || "POS"} onChange={(event) => updateDraft(index, { commercialChannel: event.target.value as "POS" | "PAYMENT_LINK" })}><option value="POS">POS</option><option value="PAYMENT_LINK">Link de pago</option></select>}
                     {draft.serviceName === "Efectivización" && bank?.name !== "CMR" && bank?.name !== "IO" && bank?.name !== "Tarjeta Comercial" && <select aria-label="Plan de comisión" value={draft.commissionPlan} onChange={(event) => updateDraft(index, { commissionPlan: event.target.value as OperationDraft["commissionPlan"] })}>{commissionPlans.filter((plan) => plan.id.startsWith("INTERBANK_") === (bank?.name === "Interbank")).map((plan) => <option key={plan.id} value={plan.id}>{plan.label}</option>)}</select>}
-                    {draft.serviceName === "Pago de deuda" && <select aria-label="Comisión de pago de deuda" value={draft.debtRate} onChange={(event) => updateDraft(index, { debtRate: event.target.value })}>{[1, 1.5, 2, 2.5].map((rate) => <option key={rate} value={rate}>{rate}% comisión</option>)}</select>}
+                    {draft.serviceName === "Pago de deuda" && <select aria-label="Comisión de pago de deuda" value={draft.debtRate} onChange={(event) => updateDraft(index, { debtRate: event.target.value })}>{[1, 1.5, 2, 2.5].map((rate) => <option key={rate} value={rate}>{rate}% comisión · mín. S/ {MIN_DEBT_COMMISSION}</option>)}</select>}
                     {draft.serviceName === "Efectivización" && ["BanBif", "Scotiabank"].includes(bank?.name || "") && <select aria-label="Tiempo de abono" value={draft.settlementTiming} onChange={(event) => updateDraft(index, { settlementTiming: event.target.value as OperationDraft["settlementTiming"] })}>{settlementTimings.map((timing) => <option key={timing.id} value={timing.id}>{timing.label}</option>)}</select>}
                     <input type="number" min="0.01" step="0.01" placeholder="Monto S/" aria-label="Monto de la operación" value={draft.amount} onChange={(event) => updateDraft(index, { amount: event.target.value })} />
                     <button type="button" className="danger small" onClick={() => setDrafts((rows) => rows.filter((_, rowIndex) => rowIndex !== index))}>Quitar</button>

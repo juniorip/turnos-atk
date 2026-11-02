@@ -85,5 +85,6 @@ export async function POST(request: Request) {
   }
   const token=await createSession({id:user.id,role:user.role,branchId:user.branchId,name:user.name}, user.passwordHash);
   const response=Response.json({user:{name:user.name,role:user.role,branch:user.branch?.name || null}});
-  response.headers.append("Set-Cookie",`turnos_atk_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=43200${process.env.NODE_ENV === "production" ? "; Secure" : ""}`); return response;
+  // Session cookie: the browser discards it when its session ends.
+  response.headers.append("Set-Cookie",`turnos_atk_session=${token}; Path=/; HttpOnly; SameSite=Lax${process.env.NODE_ENV === "production" ? "; Secure" : ""}`); return response;
 }

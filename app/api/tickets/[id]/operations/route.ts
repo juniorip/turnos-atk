@@ -1,7 +1,7 @@
 import { TicketStatus, UserRole } from "@prisma/client";
 import { z } from "zod";
 import { errorResponse, requireUser } from "@/lib/auth";
-import { COMMISSION_PLANS, effectivizacionCommission, SETTLEMENT_TIMINGS } from "@/lib/effectivizacion";
+import { COMMISSION_PLANS, debtCommission, effectivizacionCommission, SETTLEMENT_TIMINGS } from "@/lib/effectivizacion";
 import { prisma } from "@/lib/prisma";
 
 const operationSchema = z.object({
@@ -67,7 +67,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         } else {
           if (!item.debtRate) return { error: "Selecciona la comisión de Pago de deuda." } as const;
           rate = item.debtRate;
-          profit = (item.amount * rate) / 100;
+          profit = debtCommission(item.amount, rate);
           recordedAmount = Math.max(0, item.amount - profit);
         }
 

@@ -179,6 +179,26 @@
 .public-card.kiosk-card .kiosk-services > p { font-size: .82rem; }
 .public-card.kiosk-card .public-time { min-height: 38px; margin-top: 13px; font-size: .76rem; }
 .public-card.kiosk-card .public-time span { font-size: 1rem; }
+
+/* Custom district picker: keep the menu inside the kiosk design instead of the native OS select. */
+.district-select-label { position: relative; }
+.public-district-picker { position: relative; }
+.public-district-trigger { display: grid; grid-template-columns: 20px minmax(0, 1fr) 16px; align-items: center; gap: 9px; width: 100%; min-height: 44px; padding: 9px 11px; border: 1px solid #3a638a; border-radius: 9px; background: rgba(5, 16, 30, .76); color: #e8f2ff; font: inherit; font-size: .9rem; text-align: left; cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; }
+.public-district-trigger:hover, .public-district-trigger[aria-expanded="true"] { border-color: #51a7ff; background: rgba(13, 35, 61, .96); }
+.public-district-trigger:focus-visible { outline: 0; border-color: #51a7ff; box-shadow: 0 0 0 2px rgba(37, 131, 233, .2); }
+.public-district-pin { color: #91b9e4; font-size: 1.05rem; text-align: center; }
+.public-district-value { overflow: hidden; color: #e8f2ff; text-overflow: ellipsis; white-space: nowrap; }
+.public-district-value:empty { color: #8198b3; }
+.public-district-trigger svg { width: 15px; height: 15px; fill: none; stroke: #a8bed7; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; transition: transform .15s ease; }
+.public-district-trigger[aria-expanded="true"] svg { transform: rotate(180deg); }
+.public-district-menu { position: absolute; z-index: 30; top: calc(100% + 5px); left: 0; right: 0; max-height: min(230px, 34vh); overflow-y: auto; padding: 5px; border: 1px solid rgba(77, 142, 205, .58); border-radius: 10px; background: #0b192a; box-shadow: 0 14px 32px rgba(0, 0, 0, .48); scrollbar-color: #315d87 #0b192a; scrollbar-width: thin; }
+.public-district-menu::-webkit-scrollbar { width: 8px; }
+.public-district-menu::-webkit-scrollbar-track { margin: 6px 0; border-radius: 8px; background: #0b192a; }
+.public-district-menu::-webkit-scrollbar-thumb { border: 2px solid #0b192a; border-radius: 8px; background: #315d87; }
+.public-district-menu::-webkit-scrollbar-thumb:hover { background: #4b83b9; }
+.public-district-menu [role="option"] { display: block; width: 100%; min-height: 34px; padding: 7px 10px; border: 0; border-radius: 6px; background: transparent; color: #dceaff; font: inherit; font-size: .84rem; text-align: left; cursor: pointer; }
+.public-district-menu [role="option"]:hover, .public-district-menu [role="option"]:focus-visible { outline: 0; background: rgba(54, 124, 198, .24); color: #fff; }
+.public-district-menu [role="option"].selected { background: rgba(54, 124, 198, .32); color: #fff; font-weight: 700; }
 @media (max-width: 380px) { .public-card.kiosk-card { padding: 18px 14px 13px; } .kiosk-card .service-card { grid-template-columns: 36px minmax(0, 1fr) 12px; gap: 7px; min-height: 68px; padding: 8px; } .kiosk-card .service-card > span:first-child { width: 33px; height: 33px; } .kiosk-card .service-card b { font-size: .76rem; } .kiosk-card .service-card small { font-size: .62rem; } }
 @media (max-height: 760px) { .public-card.kiosk-card { padding-top: 16px; padding-bottom: 13px; } .public-card.kiosk-card h1 { margin-top: 9px; } .kiosk-card .public-label { margin-top: 8px; } .public-card.kiosk-card > .preferential-option { min-height: 58px; margin-top: 10px; } .kiosk-services { margin-top: 10px; } .kiosk-card .service-card { min-height: 66px; } .public-card.kiosk-card .public-time { min-height: 34px; margin-top: 9px; } }
 

@@ -23,6 +23,8 @@ export default function RegistroPublico() {
   const [documentType, setDocumentType] = useState<DocumentType>("DNI");
   const [documentNumber, setDocumentNumber] = useState("");
   const [district, setDistrict] = useState("");
+  const [isDistrictOpen, setIsDistrictOpen] = useState(false);
+  const districtPickerRef = useRef<HTMLDivElement>(null);
   const [isKeypadOpen, setIsKeypadOpen] = useState(false);
   const [fullName, setFullName] = useState("");
   const [manualNameAllowed, setManualNameAllowed] = useState(false);
@@ -43,6 +45,21 @@ export default function RegistroPublico() {
   }, [code]);
   useEffect(() => { setNow(new Date()); const id = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(id); }, []);
   useEffect(() => { if (!ticket) return; const id = setTimeout(reset, 12000); return () => clearTimeout(id); }, [ticket]);
+  useEffect(() => {
+    if (!isDistrictOpen) return;
+    const closeOutside = (event: MouseEvent) => {
+      if (!districtPickerRef.current?.contains(event.target as Node)) setIsDistrictOpen(false);
+    };
+    const closeEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsDistrictOpen(false);
+    };
+    document.addEventListener("mousedown", closeOutside);
+    document.addEventListener("keydown", closeEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOutside);
+      document.removeEventListener("keydown", closeEscape);
+    };
+  }, [isDistrictOpen]);
   useEffect(() => {
     const complete = documentType === "DNI" ? /^\d{8}$/.test(documentNumber) : /^\d{9}$/.test(documentNumber);
     if (complete) lookup(documentNumber, documentType);
@@ -109,7 +126,14 @@ export default function RegistroPublico() {
       {documentValidated && <small className="kiosk-valid-hint">↳　Nombre validado correctamente</small>}
       {busy && documentComplete && <small className="kiosk-status-hint">Consultando documento…</small>}
     </label>
-    <label className="public-label">Distrito de procedencia<select value={district} onChange={event => { setDistrict(event.target.value); setError(""); }} required><option value="">⌖　Selecciona tu distrito</option>{LIMA_DISTRICTS.map(item => <option value={item} key={item}>{item}</option>)}</select></label>
+    <div className="public-label district-select-label"><span id="public-district-label">Distrito de procedencia</span><div className="public-district-picker" ref={districtPickerRef}>
+      <button type="button" className="public-district-trigger" aria-labelledby="public-district-label" aria-haspopup="listbox" aria-expanded={isDistrictOpen} onClick={() => setIsDistrictOpen(open => !open)}>
+        <span className="public-district-pin" aria-hidden="true">⌖</span><span className="public-district-value">{district || "Selecciona tu distrito"}</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
+      </button>
+      {isDistrictOpen && <div className="public-district-menu" role="listbox" aria-labelledby="public-district-label">
+        {LIMA_DISTRICTS.map(item => <button type="button" role="option" aria-selected={district === item} className={district === item ? "selected" : ""} key={item} onClick={() => { setDistrict(item); setError(""); setIsDistrictOpen(false); }}>{item}</button>)}
+      </div>}
+    </div></div>
     {isKeypadOpen && <div className="document-keypad" role="group" aria-label="Teclado numérico para documento"><div className="document-keypad-grid">{["1", "2", "3", "4", "5", "6", "7", "8", "9"].map(digit => <button type="button" className="document-key" key={digit} onClick={() => appendDocumentDigit(digit)}>{digit}</button>)}<button type="button" className="document-key document-key-action" onClick={() => changeDocument("")}>Borrar todo</button><button type="button" className="document-key" onClick={() => appendDocumentDigit("0")}>0</button><button type="button" className="document-key document-key-action" onClick={removeDocumentDigit} aria-label="Borrar último dígito">⌫</button></div><button type="button" className="document-key-done" onClick={() => setIsKeypadOpen(false)}>Listo</button></div>}
     <label className="public-label">Nombre completo<div className={`kiosk-input-wrap kiosk-name-wrap ${documentValidated ? "validated" : ""}`}><span className="kiosk-field-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.2"/><path d="M5.5 20c.4-3.4 2.7-5.4 6.5-5.4s6.1 2 6.5 5.4z"/></svg></span><input value={busy && !fullName ? "Consultando…" : fullName} readOnly={!manualNameAllowed || busy} onChange={event => { setFullName(event.target.value); setError(""); }} placeholder={manualNameAllowed ? "Escribe nombres y apellidos" : "Se completará automáticamente"}/>{documentValidated && <span className="kiosk-valid-check" aria-label="Nombre validado">✓</span>}</div>{manualNameAllowed && <small className="kiosk-status-hint">Ingresa el nombre tal como aparece en su documento.</small>}</label>
     <label className="preferential-option"><input type="checkbox" checked={isPreferential} onChange={event => setIsPreferential(event.target.checked)} /><span className="preferential-access-icon" aria-hidden="true">♿</span><span className="preferential-copy"><strong>Atención preferencial</strong><small>Marca esta opción si necesitas atención prioritaria.</small></span></label>

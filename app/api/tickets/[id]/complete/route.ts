@@ -4,6 +4,7 @@ import { errorResponse, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
   COMMISSION_PLANS,
+  debtCommission,
   effectivizacionCommission,
   SETTLEMENT_TIMINGS,
 } from "@/lib/effectivizacion";
@@ -96,7 +97,7 @@ export async function POST(
           if (!op.bankId || !op.debtRate)
             throw new Error("En Pago de deuda debes indicar banco y comisión.");
           rate = op.debtRate;
-          profit = (op.amount * rate) / 100;
+          profit = debtCommission(op.amount, rate);
           recordedAmount = Math.max(0, op.amount - profit);
         } else {
           const configured = op.bankId
@@ -163,10 +164,10 @@ export async function POST(
           uploadPlatform: body.data.uploadPlatform,
           notes: completed.result.notes,
           operations: completed.result.operations.length
-            ? completed.result.operations.filter((operation) => operation.service.name === "Efectivización" || operation.service.name === "Pago de deuda").map((operation, index) => ({
+            ? completed.result.operations.filter((operation) => operation.service.name === "Efectivización" || operation.service.name === "Pago de deuda").map((operation) => ({
                 serviceName: operation.service.name as "Efectivización" | "Pago de deuda",
                 bankName: operation.bank?.name || null,
-                amount: body.data.operations[index]?.amount ?? Number(operation.amount) + Number(operation.profit),
+                amount: Number(operation.amount) + Number(operation.profit),
                 rate: Number(operation.rate),
                 profit: Number(operation.profit),
               }))

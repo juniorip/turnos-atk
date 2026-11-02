@@ -1,5 +1,6 @@
 .env*
 .local-pgdata/
+.local-demo-db/
 .vercel
 node_modules
 .next

@@ -6,6 +6,12 @@ export const SETTLEMENT_TIMINGS = [
 ] as const;
 export type SettlementTiming = (typeof SETTLEMENT_TIMINGS)[number];
 
+export const MIN_DEBT_COMMISSION = 30;
+
+export function debtCommission(amount: number, rate: number) {
+  return Math.max(MIN_DEBT_COMMISSION, (amount * rate) / 100);
+}
+
 export const commissionPlanLabel: Record<CommissionPlan, string> = {
   ATK_1: "ATK 1%",
   ATK_0_5: "ATK 0.5%",
