@@ -2,7 +2,6 @@ import { Prisma, TicketStatus, UserRole } from "@prisma/client";
 import { errorResponse, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { isRecentlyActive } from "@/lib/presence";
-import { ensureLargeRoomSchema } from "@/lib/large-room-schema";
 import { registrosATKUserRoster } from "@/lib/registros-atk-user-roster";
 import { ensureCoreBranches } from "@/lib/branches";
 import { sortTicketsForCall } from "@/lib/queue-order";
@@ -75,7 +74,6 @@ export async function GET(request: Request) {
     const params = new URL(request.url).searchParams;
     const previewMode = Boolean(user.actingAs);
     if (user.role === UserRole.ADMIN) await ensureCoreBranches();
-    if (user.role === UserRole.WORKER || user.role === UserRole.MANAGER) await ensureLargeRoomSchema();
     await ensureCommercialCard();
     await ensureEfectivizacionBanks();
     const canAttend = user.role === UserRole.WORKER || user.role === UserRole.MANAGER;

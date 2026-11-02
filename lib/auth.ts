@@ -3,7 +3,6 @@ import { cookies } from "next/headers";
 import { UserRole } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { prisma } from "./prisma";
-import { ensureTicketDistrictSchema } from "./ticket-district-schema";
 
 function sessionSecret() {
   const secret = process.env.AUTH_SECRET;
@@ -54,7 +53,6 @@ export async function sessionUser(): Promise<SessionUser | null> {
 export async function requireUser(...roles: UserRole[]) {
   const user = await sessionUser();
   if (!user || (roles.length && !roles.includes(user.role))) throw new Error("UNAUTHORIZED");
-  await ensureTicketDistrictSchema();
   return user;
 }
 export function errorResponse(error: unknown) {
