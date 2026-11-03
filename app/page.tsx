@@ -69,7 +69,7 @@ type Data = {
   activeTickets?: Ticket[];
   liveTickets?: Ticket[];
   previewMode?: boolean;
-  advisorPresence?: { id: number; name: string; moduleNumber: number | null; status: "FREE" | "OCCUPIED" | "UNAVAILABLE"; attentionsToday: number; inLargeRoom?: boolean }[];
+  advisorPresence?: { id: number; name: string; moduleNumber: number | null; status: "FREE" | "OCCUPIED" | "PAUSED" | "UNAVAILABLE"; attentionsToday: number; inLargeRoom?: boolean }[];
   largeRoom?: { branchName: string; active: boolean; isMine: boolean; advisorName: string | null; activeCount: number } | null;
   workerHistory: {
     id: number;
@@ -1242,7 +1242,7 @@ export default function Home() {
           <div className="advisor-presence-list">
             {(data.advisorPresence || []).filter((advisor) => advisor.moduleNumber !== null).sort((a, b) => (a.moduleNumber || 99) - (b.moduleNumber || 99)).map((advisor) => {
               const name = advisor.name.includes(",") ? advisor.name.split(",").pop()?.trim().split(/\s+/)[0] : advisor.name.trim().split(/\s+/)[0];
-              const label = advisor.status === "OCCUPIED" ? "Ocupado" : advisor.status === "FREE" ? "Libre" : "No disponible";
+              const label = advisor.status === "OCCUPIED" ? "Ocupado" : advisor.status === "FREE" ? "Libre" : advisor.status === "PAUSED" ? "En pausa" : "No disponible";
               const presence = advisor.inLargeRoom ? "En sala" : label;
               return <div className={"advisor-presence-row " + advisor.status.toLowerCase()} key={advisor.id} title={advisor.name}>
                 <span className="advisor-presence-dot" aria-label={advisor.inLargeRoom ? `En sala · ${label}` : label} title={advisor.inLargeRoom ? `En sala · ${label}` : label} />
