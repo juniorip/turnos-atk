@@ -7,6 +7,7 @@ import { ensureLargeRoomSchema } from "@/lib/large-room-schema";
 
 const schema = z.object({ recipientId: z.union([z.number().int().positive(), z.literal("LARGE_ROOM")]) });
 const activeStatuses = [TicketStatus.CALLED, TicketStatus.IN_SERVICE];
+const MAX_ACTIVE_TICKETS = 2;
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -24,21 +25,31 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         ...(isManager ? { branchId: user.branchId ?? -1 } : isAdmin ? {} : { assignedToId: user.id }),
         status: { in: isManager || isAdmin ? [TicketStatus.WAITING, ...activeStatuses] : activeStatuses },
       },
-      select: { id: true, serviceId: true, branchId: true, largeRoomId: true },
+      select: { id: true, serviceId: true, branchId: true, largeRoomId: true, assignedToId: true },
     });
     if (!ticket) return Response.json({ error: "El ticket no está asignado a tu atención." }, { status: 404 });
-    const advisors = await prisma.user.findMany({
+    const candidates = await prisma.user.findMany({
       where: {
         branchId: ticket.branchId,
-        id: { not: user.id },
+        id: { notIn: [user.id, ...(ticket.assignedToId ? [ticket.assignedToId] : [])] },
         role: { in: [UserRole.WORKER, UserRole.MANAGER] },
         moduleNumber: { not: null }, active: true,
         availability: WorkerAvailability.AVAILABLE,
         lastActiveAt: { gte: presenceCutoff() },
-        assigned: { none: { status: { in: activeStatuses } } },
       },
-      select: { id: true, name: true, moduleNumber: true },
+      select: { id: true, name: true, moduleNumber: true, multipleAttentionEnabled: true },
       orderBy: { name: "asc" },
+    });
+    const activeCounts = candidates.length ? await prisma.ticket.groupBy({
+      by: ["assignedToId"],
+      where: { assignedToId: { in: candidates.map((advisor) => advisor.id) }, status: { in: activeStatuses } },
+      _count: { _all: true },
+    }) : [];
+    const activeCountByAdvisor = new Map(activeCounts.map((row) => [row.assignedToId, row._count._all]));
+    const advisors = candidates.flatMap((advisor) => {
+      const activeCount = activeCountByAdvisor.get(advisor.id) || 0;
+      if (activeCount > 0 && (!advisor.multipleAttentionEnabled || activeCount >= MAX_ACTIVE_TICKETS)) return [];
+      return [{ id: advisor.id, name: advisor.name, moduleNumber: advisor.moduleNumber, activeCount, acceptsMultiple: advisor.multipleAttentionEnabled }];
     });
     const room = await prisma.largeRoom.findUnique({ where: { branchId: ticket.branchId }, include: { branch: { select: { name: true } }, worker: { select: { name: true } } } });
     const largeRoom = room?.active && room.worker && room.id !== ticket.largeRoomId
@@ -64,7 +75,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           ...(isManager ? { branchId: user.branchId ?? -1 } : isAdmin ? {} : { assignedToId: user.id }),
           status: { in: isManager || isAdmin ? [TicketStatus.WAITING, ...activeStatuses] : activeStatuses },
         },
-        select: { id: true, branchId: true, serviceId: true, status: true },
+        select: { id: true, branchId: true, serviceId: true, status: true, assignedToId: true },
       });
       if (!ticket) return { error: "El ticket ya no está disponible para transferirse.", status: 409 } as const;
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(${ticket.branchId})::text`;
@@ -88,9 +99,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           id: body.data.recipientId, branchId: ticket.branchId, role: { in: [UserRole.WORKER, UserRole.MANAGER] },
           moduleNumber: { not: null }, active: true, availability: WorkerAvailability.AVAILABLE, lastActiveAt: { gte: presenceCutoff() },
           assigned: { none: { status: { in: activeStatuses } } },
-        }, select: { id: true, name: true, moduleNumber: true },
+        }, select: { id: true, name: true, moduleNumber: true, multipleAttentionEnabled: true },
       });
       if (!recipient) return { error: "Ese asesor ya no está disponible para recibir este trámite.", status: 409 } as const;
+      if (recipient.id === ticket.assignedToId) return { error: "El ticket ya está asignado a ese asesor.", status: 409 } as const;
+      const recipientActiveCount = await tx.ticket.count({ where: { assignedToId: recipient.id, status: { in: activeStatuses } } });
+      if (recipientActiveCount > 0 && (!recipient.multipleAttentionEnabled || recipientActiveCount >= MAX_ACTIVE_TICKETS)) {
+        return { error: recipient.multipleAttentionEnabled ? "Ese asesor ya alcanzó el máximo de 2 tickets activos." : "Ese asesor ya tiene un cliente. Debe activar Atención múltiple para recibir otro ticket." , status: 409 } as const;
+      }
       const changed = await tx.ticket.updateMany({
         where: { id, ...(isManager || isAdmin ? {} : { assignedToId: user.id }), branchId: ticket.branchId, status: ticket.status },
         data: { assignedToId: recipient.id, largeRoomId: null, ...(ticket.status === TicketStatus.WAITING ? { status: TicketStatus.CALLED } : {}) },

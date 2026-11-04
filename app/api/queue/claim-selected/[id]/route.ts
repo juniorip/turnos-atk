@@ -3,14 +3,13 @@ import { errorResponse, requireUser } from "@/lib/auth";
 import { presenceCutoff } from "@/lib/presence";
 import { prisma } from "@/lib/prisma";
 
-const MAX_PENDING_CALLS = 2;
+const MAX_ACTIVE_TICKETS = 2;
 
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const allowMultiple = new URL(_request.url).searchParams.get("multiple") === "1";
     const user = await requireUser(UserRole.MANAGER);
     const id = Number((await params).id);
     if (!Number.isSafeInteger(id) || id <= 0) {
@@ -36,6 +35,7 @@ export async function POST(
           moduleNumber: true,
           availability: true,
           lastActiveAt: true,
+          multipleAttentionEnabled: true,
           branch: { select: { active: true } },
         },
       });
@@ -51,15 +51,9 @@ export async function POST(
       if (manager.availability !== WorkerAvailability.AVAILABLE) return { paused: true } as const;
       if (!manager.lastActiveAt || manager.lastActiveAt < presenceCutoff()) return { disconnected: true } as const;
 
-      const activeCall = await tx.ticket.findFirst({
-        where: { assignedToId: manager.id, status: TicketStatus.CALLED },
-        select: { id: true },
-      });
-      if (!allowMultiple && activeCall) return { active: true } as const;
-      if (allowMultiple) {
-        const pendingCalls = await tx.ticket.count({ where: { assignedToId: manager.id, status: TicketStatus.CALLED } });
-        if (pendingCalls >= MAX_PENDING_CALLS) return { pendingLimit: true } as const;
-      }
+      const activeCount = await tx.ticket.count({ where: { assignedToId: manager.id, status: { in: [TicketStatus.CALLED, TicketStatus.IN_SERVICE] } } });
+      if (!manager.multipleAttentionEnabled && activeCount > 0) return { active: true } as const;
+      if (manager.multipleAttentionEnabled && activeCount >= MAX_ACTIVE_TICKETS) return { activeLimit: true } as const;
 
       const updated = await tx.ticket.updateMany({
         where: { id, branchId, status: TicketStatus.WAITING },
@@ -87,7 +81,7 @@ export async function POST(
     if ("paused" in result) return Response.json({ error: "Marca Disponible antes de atender un turno." }, { status: 409 });
     if ("disconnected" in result) return Response.json({ error: "Tu sesión quedó desconectada. Actualiza la página e inténtalo nuevamente." }, { status: 409 });
     if ("active" in result) return Response.json({ error: "Confirma primero si el cliente llamado se acercó." }, { status: 409 });
-    if ("pendingLimit" in result) return Response.json({ error: `Ya tienes ${MAX_PENDING_CALLS} clientes esperando confirmación. Confirma uno para llamar a otro.` }, { status: 409 });
+    if ("activeLimit" in result) return Response.json({ error: `Ya tienes el máximo de ${MAX_ACTIVE_TICKETS} tickets activos. Finaliza o deriva uno antes de llamar otro.` }, { status: 409 });
     if ("unavailable" in result) return Response.json({ error: "Ese ticket ya no está en espera. Actualiza la cola e inténtalo nuevamente." }, { status: 409 });
     return Response.json(result);
   } catch (error) {

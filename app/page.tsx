@@ -21,7 +21,7 @@ const TAB_AUTH_KEY = "turnos_atk_tab_authenticated";
 const REMEMBERED_USERNAME_KEY = "turnos_atk_remembered_username";
 type Data = {
   selectedBranchId?: number | null;
-  user: { id: number; name: string; role: string; branchId: number | null; branchName?: string | null; moduleNumber?: number | null; availability?: "AVAILABLE" | "PAUSED" | null; canSelectWaitingTicket?: boolean };
+  user: { id: number; name: string; role: string; branchId: number | null; branchName?: string | null; moduleNumber?: number | null; availability?: "AVAILABLE" | "PAUSED" | null; multipleAttentionEnabled?: boolean; canSelectWaitingTicket?: boolean };
   stats: {
     waiting: number;
     inService: number;
@@ -104,6 +104,7 @@ type Ticket = {
   service: { id?: number; name: string };
   assignedTo?: { name: string; moduleNumber?: number | null };
 };
+type TransferAdvisor = { id: number; name: string; moduleNumber: number | null; activeCount: number; acceptsMultiple: boolean };
 type OperationDraft = {
   serviceName: "Efectivización" | "Pago de deuda";
   bankId: number | null;
@@ -140,7 +141,7 @@ const statusLabels: Record<string, string> = {
   FAILED: "Fallido",
   CANCELLED: "Cancelado",
 };
-const MAX_PENDING_CALLS = 2;
+const MAX_ACTIVE_TICKETS = 2;
 
 type NavIconName = "queue" | "home" | "chart" | "team" | "trend" | "settings" | "room" | "ticket" | "history";
 function NavIcon({ name }: { name: NavIconName }) {
@@ -352,6 +353,7 @@ export default function Home() {
     [current, setCurrent] = useState<Ticket | null>(null),
     [activeTickets, setActiveTickets] = useState<Ticket[]>([]),
     [multipleAttention, setMultipleAttention] = useState(false),
+    [multipleAttentionSaving, setMultipleAttentionSaving] = useState(false),
     [created, setCreated] = useState<Ticket | null>(null),
     [operations, setOperations] = useState<OperationDraft[]>([]),
     [escalation, setEscalation] = useState<
@@ -520,6 +522,7 @@ export default function Home() {
       if (next.user.role === "ADMIN") setAdminPreviewWorkers(next.adminPreviewWorkers || (next.workers || []).filter((worker: NonNullable<Data["workers"]>[number]) => worker.role === "WORKER" || worker.role === "MANAGER"));
     }
     setData(next);
+    setMultipleAttention(Boolean(next.user.multipleAttentionEnabled));
     setTickets((next.liveTickets || []) as Ticket[]);
     const nextActive = (next.activeTickets || (next.activeTicket ? [next.activeTicket] : [])) as Ticket[];
     setActiveTickets(nextActive);
@@ -748,6 +751,27 @@ export default function Home() {
       setLoading(false);
     }
   }
+  async function toggleMultipleAttention() {
+    if (multipleAttentionSaving) return;
+    const enabled = !multipleAttention;
+    setMultipleAttentionSaving(true);
+    try {
+      const response = await appFetch("/api/worker/multiple-attention", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "No se pudo guardar Atención múltiple.");
+      setMultipleAttention(Boolean(result.enabled));
+      setMessage(result.enabled ? "Atención múltiple activada. Puedes recibir derivaciones si tienes cupo." : "Atención múltiple desactivada.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo guardar Atención múltiple.");
+    } finally {
+      setMultipleAttentionSaving(false);
+    }
+  }
+
   async function claim() {
     setLoading(true);
     try {
@@ -777,8 +801,8 @@ export default function Home() {
   }
   async function claimSelected(ticket: Ticket) {
     if (!data?.user.canSelectWaitingTicket || loading || selectedClaimId !== null) return;
-    if (multipleAttention && activeTickets.filter((item) => item.status === "CALLED").length >= MAX_PENDING_CALLS) {
-      setMessage(`Ya tienes ${MAX_PENDING_CALLS} clientes esperando confirmación. Confirma uno para poder llamar a otro.`);
+    if (multipleAttention && activeTickets.length >= MAX_ACTIVE_TICKETS) {
+      setMessage(`Ya tienes el máximo de ${MAX_ACTIVE_TICKETS} tickets activos. Finaliza o deriva uno antes de llamar otro.`);
       return;
     }
     if ((current?.status === "CALLED" || current?.status === "IN_SERVICE") && !multipleAttention) {
@@ -1052,8 +1076,8 @@ export default function Home() {
   const pendingCallCount = activeTickets.filter((ticket) => ticket.status === "CALLED").length;
   const inServiceCount = activeTickets.filter((ticket) => ticket.status === "IN_SERVICE").length;
   const availabilityIndicator = inServiceCount > 0 ? "attending" : data.user.availability === "AVAILABLE" ? "available" : "paused";
-  const pendingCallLimitReached = multipleAttention
-    ? pendingCallCount >= MAX_PENDING_CALLS
+  const activeTicketLimitReached = multipleAttention
+    ? activeTickets.length >= MAX_ACTIVE_TICKETS
     : pendingCallCount >= 1;
   const isConsultation =
     (current?.service.name === "Consulta" &&
@@ -1478,21 +1502,21 @@ export default function Home() {
               shared
               onAttend={data.user.canSelectWaitingTicket ? claimSelected : undefined}
               attendingTicketId={selectedClaimId}
-              attendanceBlocked={loading || (multipleAttention && pendingCallLimitReached) || ((current?.status === "CALLED" || current?.status === "IN_SERVICE") && !multipleAttention)}
+              attendanceBlocked={loading || (multipleAttention && activeTicketLimitReached) || ((current?.status === "CALLED" || current?.status === "IN_SERVICE") && !multipleAttention)}
             />
             <article className="panel current">
               {(
                 <div className="multi-attention">
                   <div className="multi-attention-heading">
-                    <div><strong>Atención múltiple</strong><small>{pendingCallCount} llamado(s) pendiente(s) · {inServiceCount} en atención · máximo {MAX_PENDING_CALLS} por confirmar</small></div>
-                    <button type="button" className={multipleAttention ? "multi-toggle active" : "multi-toggle"} onClick={() => setMultipleAttention((enabled) => !enabled)}>{multipleAttention ? "Desactivar" : "Activar"}</button>
+                    <div><strong>Atención múltiple</strong><small>{activeTickets.length} ticket(s) activo(s) · máximo {MAX_ACTIVE_TICKETS} simultáneos</small></div>
+                    <button type="button" className={multipleAttention ? "multi-toggle active" : "multi-toggle"} onClick={() => void toggleMultipleAttention()} disabled={multipleAttentionSaving}>{multipleAttentionSaving ? "Guardando…" : multipleAttention ? "Desactivar" : "Activar"}</button>
                   </div>
                   {activeTickets.length > 1 && <div className="multi-ticket-list" aria-label="Tickets activos">
                     {activeTickets.map((ticket) => <button type="button" key={ticket.id} className={current?.id === ticket.id ? "multi-ticket selected" : "multi-ticket"} onClick={() => { setCurrent(ticket); setOperations([]); setEscalation(null); setRegistrationRequested(false); setUploadPlatform("WEB"); }}><b>{ticket.code}</b><span>{ticket.clientName}</span><small>{statusLabels[ticket.status] || ticket.status}</small></button>)}
                   </div>}
                   {multipleAttention && <div className="multi-call-row">
-                    <span>{pendingCallLimitReached ? `Tienes ${pendingCallCount} clientes llamados. Confirma si se acercaron para liberar un cupo.` : current?.status === "IN_SERVICE" || current?.status === "CALLED" ? "Puedes seguir atendiendo; confirma los llamados pendientes antes de acumular más." : "Llama al siguiente cliente de la cola compartida."}</span>
-                    <button type="button" onClick={claim} disabled={loading || pendingCallLimitReached || data.user.availability !== "AVAILABLE" || (current?.status === "CALLED" && !multipleAttention)}>{loading ? "Llamando…" : pendingCallLimitReached ? "Confirma un cliente" : "Llamar siguiente"}</button>
+                    <span>{activeTicketLimitReached ? `Tienes ${activeTickets.length} tickets activos. Finaliza o deriva uno para liberar un cupo.` : current?.status === "IN_SERVICE" || current?.status === "CALLED" ? "Puedes llamar otro cliente mientras tengas un cupo activo." : "Llama al siguiente cliente de la cola compartida."}</span>
+                    <button type="button" onClick={claim} disabled={loading || activeTicketLimitReached || data.user.availability !== "AVAILABLE" || (current?.status === "CALLED" && !multipleAttention)}>{loading ? "Llamando…" : activeTicketLimitReached ? "Límite alcanzado" : "Llamar siguiente"}</button>
                   </div>}
                 </div>
               )}
@@ -1919,7 +1943,7 @@ function LiveTickets({ tickets, canManage = false, onTransferred }: { tickets: T
   );
 }
 function LiveTicketRow({ ticket, canManage, onTransferred, isNext = false }: { ticket: Ticket; canManage: boolean; onTransferred?: (ticket: Ticket, advisorName: string) => Promise<void>; isNext?: boolean }) {
-  const [advisors, setAdvisors] = useState<{ id: number; name: string; moduleNumber: number | null }[]>([]);
+  const [advisors, setAdvisors] = useState<TransferAdvisor[]>([]);
   const [largeRoom, setLargeRoom] = useState<{ branchName: string; advisorName: string } | null>(null);
   const [recipientId, setRecipientId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1959,7 +1983,7 @@ function LiveTicketRow({ ticket, canManage, onTransferred, isNext = false }: { t
       <div className="manager-transfer-controls">
         <select id={`transfer-${ticket.id}`} value={recipientId} onFocus={refreshAdvisors} onChange={(event) => setRecipientId(event.target.value)} disabled={busy} aria-label={`Módulo libre para ${ticket.code}`}>
           <option value="">{advisors.length || largeRoom ? "Selecciona destino…" : "No hay asesores o salas activos"}</option>
-          {advisors.map((advisor) => <option key={advisor.id} value={advisor.id}>Módulo {advisor.moduleNumber} · {advisor.name}</option>)}
+          {advisors.map((advisor) => <option key={advisor.id} value={advisor.id}>Módulo {advisor.moduleNumber} · {advisor.name}{advisor.activeCount > 0 ? " · ya atiende " + advisor.activeCount : ""}</option>)}
           {largeRoom && <option value="LARGE_ROOM">Sala grande · {largeRoom.advisorName}</option>}
         </select>
         <button type="button" className="ghost small" onClick={transfer} disabled={!recipientId || busy}>{busy ? "Derivando…" : "Confirmar derivación"}</button>
@@ -1969,7 +1993,7 @@ function LiveTicketRow({ ticket, canManage, onTransferred, isNext = false }: { t
   </div>;
 }
 function TicketTransfer({ ticketId, ticketCode, onTransferred }: { ticketId: number; ticketCode: string; onTransferred: (advisorName: string) => Promise<void> }) {
-  const [advisors, setAdvisors] = useState<{ id: number; name: string; moduleNumber: number | null }[]>([]);
+  const [advisors, setAdvisors] = useState<TransferAdvisor[]>([]);
   const [largeRoom, setLargeRoom] = useState<{ branchName: string; advisorName: string } | null>(null);
   const [recipientId, setRecipientId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -2002,7 +2026,7 @@ function TicketTransfer({ ticketId, ticketCode, onTransferred }: { ticketId: num
       <div className="ticket-transfer-controls">
         <select id={`transfer-${ticketId}`} value={recipientId} onChange={(event) => setRecipientId(event.target.value)} disabled={busy || (!advisors.length && !largeRoom)}>
           <option value="">{advisors.length || largeRoom ? "Selecciona un destino disponible" : "No hay asesores ni salas disponibles en la sede"}</option>
-          {advisors.map((advisor) => <option key={advisor.id} value={advisor.id}>Módulo {advisor.moduleNumber} · {advisor.name}</option>)}
+          {advisors.map((advisor) => <option key={advisor.id} value={advisor.id}>Módulo {advisor.moduleNumber} · {advisor.name}{advisor.activeCount > 0 ? " · ya atiende " + advisor.activeCount : ""}</option>)}
           {largeRoom && <option value="LARGE_ROOM">Sala grande · {largeRoom.advisorName}</option>}
         </select>
         <button type="button" className="ghost small" onClick={transfer} disabled={!recipientId || busy}>{busy ? "Transfiriendo…" : "Transferir"}</button>

@@ -5,11 +5,10 @@ import { sortTicketsForCall } from "@/lib/queue-order";
 import { presenceCutoff } from "@/lib/presence";
 
 const activeStatuses = [TicketStatus.CALLED, TicketStatus.IN_SERVICE];
-const MAX_PENDING_CALLS = 2;
+const MAX_ACTIVE_TICKETS = 2;
 
 export async function POST(request: Request) {
   try {
-    const allowMultiple = new URL(request.url).searchParams.get("multiple") === "1";
     const user = await requireUser(UserRole.WORKER, UserRole.MANAGER);
     if (!user.branchId) return Response.json({ error: "No tienes una sede asignada." }, { status: 400 });
     const branchId = user.branchId;
@@ -20,7 +19,7 @@ export async function POST(request: Request) {
 
       const requester = await tx.user.findUnique({
         where: { id: user.id },
-        select: { active: true, branchId: true, moduleNumber: true, availability: true, lastActiveAt: true },
+        select: { active: true, branchId: true, moduleNumber: true, availability: true, lastActiveAt: true, multipleAttentionEnabled: true },
       });
       if (!requester?.active || requester.branchId !== branchId || requester.moduleNumber === null) {
         return { ineligible: true } as const;
@@ -28,15 +27,9 @@ export async function POST(request: Request) {
       if (requester.availability !== WorkerAvailability.AVAILABLE) return { paused: true } as const;
       if (!requester.lastActiveAt || requester.lastActiveAt < presenceCutoff()) return { disconnected: true } as const;
 
-      const activeTicket = await tx.ticket.findFirst({
-        where: { assignedToId: user.id, status: TicketStatus.CALLED },
-        select: { id: true },
-      });
-      if (!allowMultiple && activeTicket) return { active: true } as const;
-      if (allowMultiple) {
-        const pendingCalls = await tx.ticket.count({ where: { assignedToId: user.id, status: TicketStatus.CALLED } });
-        if (pendingCalls >= MAX_PENDING_CALLS) return { pendingLimit: true } as const;
-      }
+      const activeCount = await tx.ticket.count({ where: { assignedToId: user.id, status: { in: activeStatuses } } });
+      if (!requester.multipleAttentionEnabled && activeCount > 0) return { active: true } as const;
+      if (requester.multipleAttentionEnabled && activeCount >= MAX_ACTIVE_TICKETS) return { activeLimit: true } as const;
 
       const waiting = await tx.ticket.findMany({
         where: { branchId, status: TicketStatus.WAITING },
@@ -64,7 +57,7 @@ export async function POST(request: Request) {
     if ("paused" in result) return Response.json({ error: "Estás en pausa. Marca Disponible para poder llamar turnos." }, { status: 409 });
     if ("disconnected" in result) return Response.json({ error: "Tu sesión quedó desconectada. Actualiza la página para volver a llamar turnos." }, { status: 409 });
     if ("active" in result) return Response.json({ error: "Confirma primero si el cliente llamado se acercó antes de llamar otro ticket." }, { status: 409 });
-    if ("pendingLimit" in result) return Response.json({ error: `Ya tienes ${MAX_PENDING_CALLS} clientes esperando confirmación. Confirma uno para llamar a otro.` }, { status: 409 });
+    if ("activeLimit" in result) return Response.json({ error: `Ya tienes el máximo de ${MAX_ACTIVE_TICKETS} tickets activos. Finaliza o deriva uno antes de llamar otro.` }, { status: 409 });
     return Response.json(result);
   } catch (error) {
     return errorResponse(error);
