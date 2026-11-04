@@ -2,6 +2,7 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { appFetch } from "@/lib/app-fetch";
 import { LIMA_DISTRICTS } from "@/lib/lima-districts";
 
 type Service = { id: number; name: string };
@@ -38,7 +39,7 @@ export default function RegistroPublico() {
   const verifiedDocument = useRef<string | null>(null);
 
   useEffect(() => {
-    fetch(`/api/public/branch?code=${encodeURIComponent(code)}`).then(r => r.json()).then(result => {
+    appFetch(`/api/public/branch?code=${encodeURIComponent(code)}`).then(r => r.json()).then(result => {
       if (result.branch) { setBranch(result.branch); setServices(result.services); }
       else setError(result.error || "Sede no disponible.");
     }).catch(() => setError("No se pudo conectar."));
@@ -72,7 +73,7 @@ export default function RegistroPublico() {
     verifiedDocument.current = null;
     setBusy(true); setError(""); setFullName("");
     try {
-      const response = await fetch("/api/dni", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ document: value, documentType: type }) });
+      const response = await appFetch("/api/dni", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ document: value, documentType: type }) });
       const result = await response.json().catch(() => ({}));
       if (generation !== lookupGeneration.current) return;
       if (!response.ok) { if (type === "CE") setManualNameAllowed(true); setError(type === "CE" ? `${result.error || "No encontramos este documento."} Ingresa el nombre manualmente.` : result.error || "No encontramos este documento."); return; }
@@ -104,7 +105,7 @@ export default function RegistroPublico() {
     if (!fullName.trim() || (!verified && !manualCE)) { setError("Completa el nombre y un documento válido para continuar."); return; }
     setBusy(true); setError("");
     try {
-      const response = await fetch("/api/public/tickets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ branchCode: code, dni: documentNumber, documentType, clientName: fullName, district, isPreferential, serviceId: service.id }) });
+      const response = await appFetch("/api/public/tickets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ branchCode: code, dni: documentNumber, documentType, clientName: fullName, district, isPreferential, serviceId: service.id }) });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) { setError(result.error || "No se pudo generar tu ticket."); return; }
       setTicket(result.ticket);

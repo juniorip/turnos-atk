@@ -37,15 +37,15 @@ async function syncUserFromRegistros(username: string, password: string) {
   if (!source?.username || !source.name || !source.sede?.trim()) throw new Error("REGISTROS_ATK_INVALID_RESPONSE");
 
   // External authentication must not undo local account restrictions.
+  const role: UserRole = source.role === "ADMIN" ? UserRole.ADMIN : source.role === "MANAGER" ? UserRole.MANAGER : UserRole.WORKER;
   const existing = await prisma.user.findUnique({ where: { username: source.username }, include: { branch: true } });
   if (existing) {
     if (!existing.active) return null;
     const branch = await findOrCreateBranch(getTurnosBranchName(source.username, source.sede));
-    return prisma.user.update({ where: { id: existing.id, active: true }, data: { name: source.name, dni: source.dni || existing.dni, branchId: branch.id, availability: branch.id === existing.branchId ? undefined : WorkerAvailability.PAUSED }, include: { branch: true } });
+    return prisma.user.update({ where: { id: existing.id, active: true }, data: { name: source.name, dni: source.dni || existing.dni, role, branchId: branch.id, availability: branch.id === existing.branchId ? undefined : WorkerAvailability.PAUSED }, include: { branch: true } });
   }
 
   const branch = await findOrCreateBranch(getTurnosBranchName(source.username, source.sede));
-  const role: UserRole = source.role === "ADMIN" ? UserRole.ADMIN : source.role === "MANAGER" ? UserRole.MANAGER : UserRole.WORKER;
   // Registros ATK verifies the credential. Store only an unrelated random hash
   // locally so Turnos sessions can still be revoked against the current user row.
   const passwordHash = await bcrypt.hash(randomBytes(32).toString("hex"), 12);
@@ -86,5 +86,6 @@ export async function POST(request: Request) {
   const token=await createSession({id:user.id,role:user.role,branchId:user.branchId,name:user.name}, user.passwordHash);
   const response=Response.json({user:{name:user.name,role:user.role,branch:user.branch?.name || null}});
   // Session cookie: the browser discards it when its session ends.
-  response.headers.append("Set-Cookie",`turnos_atk_session=${token}; Path=/; HttpOnly; SameSite=Lax${process.env.NODE_ENV === "production" ? "; Secure" : ""}`); return response;
+  const cookiePath = process.env.NEXT_PUBLIC_APP_BASE_PATH || "/";
+  response.headers.append("Set-Cookie",`turnos_atk_session=${token}; Path=${cookiePath}; HttpOnly; SameSite=Lax${process.env.NODE_ENV === "production" ? "; Secure" : ""}`); return response;
 }

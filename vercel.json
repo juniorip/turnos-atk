@@ -1,4 +1,21 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "redirects": [
+    {
+      "source": "/registro/:path*",
+      "destination": "https://atkportal.app/turnos/registro/:path*",
+      "permanent": false
+    },
+    {
+      "source": "/pantalla/:path*",
+      "destination": "https://atkportal.app/turnos/pantalla/:path*",
+      "permanent": false
+    },
+    {
+      "source": "/",
+      "destination": "https://atkportal.app/",
+      "permanent": false
+    }
+  ],
   "ignoreCommand": "if [ \"$VERCEL_GIT_COMMIT_REF\" = \"codex/portal-login\" ]; then exit 0; else exit 1; fi"
 }

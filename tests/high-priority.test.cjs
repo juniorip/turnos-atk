@@ -19,6 +19,7 @@ function load(file, dependencies, extras = {}, includeShared = true) {
   return exports;
 }
 const sharedDependencies = {
+  '@/lib/app-fetch': { appBasePath: '', appFetch: (...args) => fetch(...args), appAsset: path => path },
   '@/lib/presence': load('lib/presence.ts', {}, {}, false),
   '@/lib/queue-order': load('lib/queue-order.ts', {}, {}, false),
   '@/lib/branch-overrides': load('lib/branch-overrides.ts', {}, {}, false),
@@ -207,10 +208,10 @@ function componentFixture(file, fetch) {
     useCallback(fn, deps) { const id = cursor++; if (changed(hooks[id]?.deps, deps)) hooks[id] = { deps, fn }; return hooks[id].fn; },
   };
   const jsx = (type, props) => ({ type, props });
-  const component = load(file, { react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'fragment' }, 'next/navigation': { useParams: () => ({ sede: 'LIN' }) }, '@/lib/effectivizacion': commission }, {
+  const component = load(file, { react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'fragment' }, 'next/navigation': { useParams: () => ({ sede: 'LIN' }) }, '@/lib/effectivizacion': commission, '@/lib/app-fetch': { appBasePath: '', appFetch: (...args) => fetch(...args), appAsset: path => path } }, {
     fetch, setInterval: fn => { intervals.push(fn); return intervals.length; }, clearInterval() {}, setTimeout: fn => { timers.push(fn); return timers.length; }, clearTimeout() {}, URLSearchParams,
     document: { addEventListener() {}, removeEventListener() {} },
-    window: { setInterval: fn => { intervals.push(fn); return intervals.length; }, clearInterval() {}, setTimeout: fn => { timers.push(fn); return timers.length; }, clearTimeout() {}, addEventListener() {}, removeEventListener() {}, sessionStorage: { getItem: () => '1', setItem() {}, removeItem() {} }, localStorage: { getItem: () => null, setItem() {}, removeItem() {} } },
+    window: { location: { href: 'http://localhost/' }, setInterval: fn => { intervals.push(fn); return intervals.length; }, clearInterval() {}, setTimeout: fn => { timers.push(fn); return timers.length; }, clearTimeout() {}, addEventListener() {}, removeEventListener() {}, sessionStorage: { getItem: () => '1', setItem() {}, removeItem() {} }, localStorage: { getItem: () => null, setItem() {}, removeItem() {} } },
   }).default;
   function render() { cursor = 0; const tree = component(); const effects = pending; pending = []; effects.forEach(effect => effect()); return tree; }
   async function settle() { for (let i = 0; i < 5; i++) { await new Promise(resolve => setImmediate(resolve)); render(); } return render(); }

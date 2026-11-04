@@ -1,4 +1,5 @@
 import { notFound, redirect } from "next/navigation";
+import { appAsset } from "@/lib/app-fetch";
 
 const shortcuts: Record<string, string> = {
   lin: "LIN",
@@ -21,5 +22,5 @@ export default async function BranchShortcut({
   const { sede } = await params;
   const code = shortcuts[sede.trim().toLowerCase()];
   if (!code) notFound();
-  redirect(`/registro/${code}`);
+  redirect(appAsset(`/registro/${code}`));
 }

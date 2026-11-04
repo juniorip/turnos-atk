@@ -2,6 +2,7 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { appAsset, appFetch } from "@/lib/app-fetch";
 
 type TicketOnScreen = { code: string; isPreferential: boolean; startedAt?: string; displayName: string; module?: number | null; testOnly?: boolean; service: { name: string } };
 type QueueState = {
@@ -58,7 +59,7 @@ export default function PantallaPublica() {
     try {
       const query = new URLSearchParams({ branch: code, ticket: ticket.code });
       if (ticket.testOnly) query.set("test", "1");
-      const response = await fetch(`/api/public/announcement?${query}`, { cache: "no-store" });
+      const response = await appFetch(`/api/public/announcement?${query}`, { cache: "no-store" });
       if (!response.ok) {
         const result = await response.json().catch(() => null);
         throw new Error(result?.error || `No se pudo generar la voz (${response.status}).`);
@@ -102,7 +103,7 @@ export default function PantallaPublica() {
     let cancelled = false;
     async function poll() {
       try {
-        const response = await fetch(`/api/public/queue?code=${encodeURIComponent(code)}`, { cache: "no-store" });
+        const response = await appFetch(`/api/public/queue?code=${encodeURIComponent(code)}`, { cache: "no-store" });
         const json = await response.json();
         if (cancelled) return;
         if (!response.ok) { setState({ branch: null, calling: [], waitingCount: 0, nextTickets: [], recentlyCompleted: [], error: json.error }); return; }
@@ -154,7 +155,7 @@ export default function PantallaPublica() {
   return (
     <main className="screen-page">
       <header className="screen-header">
-        <img className="screen-logo" src="/atk-peru-wk.png?v=20261019" alt="ATK Altoque Perú WK" />
+        <img className="screen-logo" src={appAsset("/atk-peru-wk.png?v=20261019")} alt="ATK Altoque Perú WK" />
         <div className="screen-header-tools">
           <div className="screen-audio-control">
             <button className={`screen-audio-button ${voiceEnabled && !voiceError ? "is-enabled" : ""}`} type="button" onClick={enableVoice} aria-pressed={voiceEnabled} title={voiceError || "Anuncios de turno con voz de ElevenLabs."}>

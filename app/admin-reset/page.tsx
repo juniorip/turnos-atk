@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { appFetch } from "@/lib/app-fetch";
 
 type BackupInfo = { backupHash: string; generatedAt: string; ticketCount: number };
 
@@ -15,7 +16,7 @@ export default function AdminTicketResetPage() {
     setMessage("");
     setBackup(null);
     try {
-      const response = await fetch("/api/admin/tickets-maintenance", { cache: "no-store" });
+      const response = await appFetch("/api/admin/tickets-maintenance", { cache: "no-store" });
       if (!response.ok) {
         const result = await response.json().catch(() => ({}));
         setMessage(result.error || "No se pudo preparar el respaldo. Confirma que estés en la sesión de administrador.");
@@ -49,7 +50,7 @@ export default function AdminTicketResetPage() {
     setBusy(true);
     setMessage("");
     try {
-      const response = await fetch("/api/admin/tickets-maintenance", {
+      const response = await appFetch("/api/admin/tickets-maintenance", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ confirmation: "BORRAR_TODOS_LOS_TICKETS", backupHash: backup.backupHash }),

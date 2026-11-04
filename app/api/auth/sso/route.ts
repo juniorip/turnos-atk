@@ -65,11 +65,14 @@ export async function POST(request: Request) {
       user = await prisma.user.update({ where: { id: user.id }, data: { availability: user.moduleNumber ? user.availability : WorkerAvailability.PAUSED, lastActiveAt: new Date() }, include: { branch: true } });
     }
     const token = await createSession({ id: user.id, role: user.role, branchId: user.branchId, name: user.name }, user.passwordHash);
-    const target = new URL("/", request.url);
-    const result = Response.redirect(target, 303);
-    result.headers.append("Set-Cookie", `turnos_atk_session=${token}; Path=/; HttpOnly; SameSite=Lax${process.env.NODE_ENV === "production" ? "; Secure" : ""}`);
-    result.headers.set("Cache-Control", "no-store");
-    return result;
+    const basePath = process.env.NEXT_PUBLIC_APP_BASE_PATH || "";
+    const forwardedHost = request.headers.get("x-forwarded-host");
+    const forwardedProto = request.headers.get("x-forwarded-proto") || "https";
+    const portalOrigin = process.env.UNIFIED_PUBLIC_ORIGIN || (forwardedHost ? `${forwardedProto}://${forwardedHost}` : new URL(request.url).origin);
+    const target = new URL(`${basePath}/?sso=complete`, portalOrigin);
+    const headers = new Headers({ Location: target.toString(), "Cache-Control": "no-store" });
+    headers.append("Set-Cookie", `turnos_atk_session=${token}; Path=${basePath || "/"}; HttpOnly; SameSite=Lax${process.env.NODE_ENV === "production" ? "; Secure" : ""}`);
+    return new Response(null, { status: 303, headers });
   } catch (error) {
     console.error("Turnos unified login failed", error instanceof Error ? error.name : "UnknownError");
     return Response.json({ error: "No se pudo completar el acceso. Vuelve al portal e intenta otra vez." }, { status: 503 });

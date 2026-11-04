@@ -17,7 +17,13 @@ export async function POST(request: Request) {
 
     const cookieStore = await cookies();
     if (body.data.action === "stop") {
-      cookieStore.delete(actingAsCookieName);
+      cookieStore.set(actingAsCookieName, "", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: process.env.NEXT_PUBLIC_APP_BASE_PATH || "/",
+        maxAge: 0,
+      });
       return Response.json({ ok: true });
     }
 
@@ -35,7 +41,7 @@ export async function POST(request: Request) {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      path: "/",
+      path: process.env.NEXT_PUBLIC_APP_BASE_PATH || "/",
       maxAge: 12 * 60 * 60,
     });
     return Response.json({ ok: true });

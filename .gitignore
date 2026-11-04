@@ -3,6 +3,7 @@
 .vercel/
 node_modules/
 .next/
+.next-unified/
 *.tsbuildinfo
 npm-debug.log*
 pnpm-debug.log*

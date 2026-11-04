@@ -5,15 +5,16 @@ import "./effectivizacion.css";
 import "./screen.css";
 import "./preferential.css";
 import type { Metadata, Viewport } from "next";
+const appBasePath = process.env.NEXT_PUBLIC_APP_BASE_PATH || "";
 export const metadata: Metadata={
   title:"Turnos ATK",
   description:"Gestión de atención y turnos",
   applicationName:"Turnos ATK",
-  manifest:"/manifest.webmanifest",
+  manifest:`${appBasePath}/manifest.webmanifest`,
   appleWebApp:{capable:true,title:"Turnos ATK",statusBarStyle:"black-translucent"},
   icons:{
-    icon:[{url:"/icons/turnos-192.png",sizes:"192x192",type:"image/png"},{url:"/icons/turnos-512.png",sizes:"512x512",type:"image/png"}],
-    apple:[{url:"/icons/turnos-180.png",sizes:"180x180",type:"image/png"}],
+    icon:[{url:`${appBasePath}/icons/turnos-192.png`,sizes:"192x192",type:"image/png"},{url:`${appBasePath}/icons/turnos-512.png`,sizes:"512x512",type:"image/png"}],
+    apple:[{url:`${appBasePath}/icons/turnos-180.png`,sizes:"180x180",type:"image/png"}],
   },
 };
 export const viewport: Viewport = { themeColor:"#0a1422" };

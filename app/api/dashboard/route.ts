@@ -150,7 +150,15 @@ export async function GET(request: Request) {
     const advisorPresence = canAttend ? workers.map((worker) => {
       const activeCount = advisorActiveTickets.filter((ticket) => ticket.assignedToId === worker.id).length;
       const online = isRecentlyActive(worker.lastActiveAt);
-      const status = activeCount ? "OCCUPIED" : worker.moduleNumber && worker.availability === "AVAILABLE" && online ? "FREE" : "UNAVAILABLE";
+      const status = activeCount
+        ? "OCCUPIED"
+        : !online
+          ? "UNAVAILABLE"
+          : worker.availability !== "AVAILABLE"
+            ? "PAUSED"
+            : worker.moduleNumber
+              ? "FREE"
+              : "UNAVAILABLE";
       return {
         id: worker.id,
         name: worker.name,

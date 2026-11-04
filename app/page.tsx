@@ -2,6 +2,7 @@
 import { ChangeEvent, FormEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
 import { debtCommission, effectivizacionCommission, MIN_DEBT_COMMISSION } from "@/lib/effectivizacion";
 import { LIMA_DISTRICTS } from "@/lib/lima-districts";
+import { appAsset, appFetch } from "@/lib/app-fetch";
 type PreviewWorker = { id: number; name: string; role: string; moduleNumber: number | null; branch?: { name: string } | null };
 type BranchComparisonData = {
   branches: { branchId: number; branchName: string; received: number; completed: number; failed: number; cancelled: number; operations: number; volume: number; netVolume: number; profit: number }[];
@@ -69,7 +70,7 @@ type Data = {
   activeTickets?: Ticket[];
   liveTickets?: Ticket[];
   previewMode?: boolean;
-  advisorPresence?: { id: number; name: string; moduleNumber: number | null; status: "FREE" | "OCCUPIED" | "UNAVAILABLE"; attentionsToday: number; inLargeRoom?: boolean }[];
+  advisorPresence?: { id: number; name: string; moduleNumber: number | null; status: "FREE" | "OCCUPIED" | "PAUSED" | "UNAVAILABLE"; attentionsToday: number; inLargeRoom?: boolean }[];
   largeRoom?: { branchName: string; active: boolean; isMine: boolean; advisorName: string | null; activeCount: number } | null;
   workerHistory: {
     id: number;
@@ -270,7 +271,7 @@ function AdvisorModulePicker({ moduleNumber, onChanged }: { moduleNumber: number
   const [error, setError] = useState("");
   const loadModules = useCallback(async () => {
     try {
-      const response = await fetch("/api/worker/module", { cache: "no-store" });
+      const response = await appFetch("/api/worker/module", { cache: "no-store" });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "No se pudieron cargar los módulos.");
       setModules(result.modules || []);
@@ -296,7 +297,7 @@ function AdvisorModulePicker({ moduleNumber, onChanged }: { moduleNumber: number
     setError("");
     setNotice("");
     try {
-      const response = await fetch("/api/worker/module", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ moduleNumber: nextModule }) });
+      const response = await appFetch("/api/worker/module", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ moduleNumber: nextModule }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "No se pudo asignar el módulo.");
       setServerModule(result.moduleNumber);
@@ -484,7 +485,7 @@ export default function Home() {
     if (!isSummarySection && rangeTo) range.set("to", rangeTo);
     let response: Response;
     try {
-      response = await fetch(`/api/dashboard?${range}`, { cache: "no-store", signal: AbortSignal.timeout(25_000) });
+      response = await appFetch(`/api/dashboard?${range}`, { cache: "no-store", signal: AbortSignal.timeout(25_000) });
     } catch {
       if (generation === refreshGeneration.current) {
         setAdminBranchSwitching(false);
@@ -537,7 +538,7 @@ export default function Home() {
     try {
       const query = new URLSearchParams();
       if (data?.user.role === "ADMIN" && adminBranchId) query.set("branchId", adminBranchId);
-      const response = await fetch(`/api/tickets${query.size ? `?${query}` : ""}`, { cache: "no-store", signal: AbortSignal.timeout(10_000) });
+      const response = await appFetch(`/api/tickets${query.size ? `?${query}` : ""}`, { cache: "no-store", signal: AbortSignal.timeout(10_000) });
       if (!response.ok) return false;
       const result = await response.json();
       if (generation !== ticketRefreshGeneration.current) return false;
@@ -560,7 +561,7 @@ export default function Home() {
           const notification = new Notification("Nuevo ticket por atender", {
             body: newest.code + " · " + newest.clientName + " · " + newest.service.name + extra,
             tag: "turnos-ticket-" + newest.id,
-            icon: "/icons/turnos-192.png?v=20261019",
+            icon: appAsset("/icons/turnos-192.png?v=20261019"),
           });
           notification.onclick = () => { window.focus(); setSection("queue"); notification.close(); };
         }
@@ -580,6 +581,13 @@ export default function Home() {
     setRegistrationRequested(false);
     setUploadPlatform("WEB");
   }, [current?.id]);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("sso") !== "complete") return;
+    window.sessionStorage.setItem(TAB_AUTH_KEY, "1");
+    url.searchParams.delete("sso");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }, []);
   useEffect(() => {
     let stopped = false;
     let timer: number | undefined;
@@ -622,13 +630,17 @@ export default function Home() {
       if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [refreshLiveTickets]);
+  useEffect(() => {
+    if (!sessionReady || data) return;
+    window.location.replace(appAsset("/api/auth/portal"));
+  }, [sessionReady, data]);
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
     setMessage("");
     try {
       const f = new FormData(event.currentTarget);
-      const r = await fetch("/api/auth/login", {
+      const r = await appFetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -670,7 +682,7 @@ export default function Home() {
     );
     if (nameInput) nameInput.value = "";
     try {
-      const r = await fetch("/api/dni", {
+      const r = await appFetch("/api/dni", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ document: docNumber, documentType }),
@@ -705,7 +717,7 @@ export default function Home() {
         setMessage("Consulta el documento actual antes de generar el ticket.");
         return;
       }
-      const r = await fetch("/api/tickets", {
+      const r = await appFetch("/api/tickets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -739,7 +751,7 @@ export default function Home() {
   async function claim() {
     setLoading(true);
     try {
-      const r = await fetch(`/api/queue/claim${multipleAttention ? "?multiple=1" : ""}`, { method: "POST" });
+      const r = await appFetch(`/api/queue/claim${multipleAttention ? "?multiple=1" : ""}`, { method: "POST" });
       const json = await r.json().catch(() => ({}));
       if (!r.ok) {
         setMessage(json.error || "No se pudo llamar el siguiente ticket.");
@@ -777,7 +789,7 @@ export default function Home() {
     }
     setSelectedClaimId(ticket.id);
     try {
-      const response = await fetch(`/api/queue/claim-selected/${ticket.id}${multipleAttention ? "?multiple=1" : ""}`, { method: "POST" });
+      const response = await appFetch(`/api/queue/claim-selected/${ticket.id}${multipleAttention ? "?multiple=1" : ""}`, { method: "POST" });
       const json = await response.json().catch(() => ({}));
       if (!response.ok) {
         setMessage(json.error || "No se pudo asignar el ticket.");
@@ -803,7 +815,7 @@ export default function Home() {
     const leaving = Boolean(data.largeRoom?.active && data.largeRoom.isMine);
     setRoomActionLoading(true);
     try {
-      const response = await fetch("/api/worker/large-room", {
+      const response = await appFetch("/api/worker/large-room", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: leaving ? "deactivate" : "activate" }),
@@ -829,7 +841,7 @@ export default function Home() {
     if (!data?.largeRoom?.isMine || !selectedRoomTicketIds.length || roomAssignLoading) return;
     setRoomAssignLoading(true);
     try {
-      const response = await fetch("/api/worker/large-room", {
+      const response = await appFetch("/api/worker/large-room", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "assign", ticketIds: selectedRoomTicketIds }),
@@ -857,7 +869,7 @@ export default function Home() {
   async function setAvailability(availability: "AVAILABLE" | "PAUSED") {
     setLoading(true);
     try {
-      const response = await fetch("/api/worker/availability", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ availability }) });
+      const response = await appFetch("/api/worker/availability", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ availability }) });
       const json = await response.json().catch(() => ({}));
       if (!response.ok) { setMessage(json.error || "No se pudo cambiar tu disponibilidad."); return; }
       setMessage(availability === "AVAILABLE" ? "Estás disponible para recibir turnos." : "Te marcaste en pausa. No recibirás nuevas asignaciones.");
@@ -871,11 +883,11 @@ export default function Home() {
     setPreviewSwitching(true);
     try {
       if (isPreviewMode) {
-        const stopped = await fetch("/api/admin/impersonate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "stop" }) });
+        const stopped = await appFetch("/api/admin/impersonate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "stop" }) });
         if (!stopped.ok) throw new Error("No se pudo volver a la sesión del administrador.");
       }
       if (id) {
-        const response = await fetch("/api/admin/impersonate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "start", workerId: Number(id) }) });
+        const response = await appFetch("/api/admin/impersonate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "start", workerId: Number(id) }) });
         const result = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(result.error || "No se pudo abrir la sesión del colaborador.");
       }
@@ -908,7 +920,7 @@ export default function Home() {
     if (status === "FAILED" && !confirm(`¿Marcar ${current.code} como fallido porque no se acercó?`)) return;
     setLoading(true);
     try {
-      const response = await fetch(`/api/tickets/${current.id}/status`, {
+      const response = await appFetch(`/api/tickets/${current.id}/status`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
@@ -952,7 +964,7 @@ export default function Home() {
       const validOperations = operations
         .filter((o) => Number(o.amount) > 0)
         .map((o) => ({ ...o, amount: Number(o.amount) }));
-      const r = await fetch(`/api/tickets/${current.id}/complete`, {
+      const r = await appFetch(`/api/tickets/${current.id}/complete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1000,7 +1012,7 @@ export default function Home() {
       <main className="login session-check-screen">
         <div className="login-shell">
           <div className="login-brand">
-            <img src="/atk-peru-wk.png?v=20261019" alt="ATK Altoque Perú WK" />
+            <img src={appAsset("/atk-peru-wk.png?v=20261019")} alt="ATK Altoque Perú WK" />
             <p>Sistema de tickets</p>
           </div>
           <section className="login-card session-check-card" role="status" aria-live="polite">
@@ -1013,17 +1025,15 @@ export default function Home() {
     );
   if (!data)
     return (
-      <main className="login">
+      <main className="login session-check-screen">
         <div className="login-shell">
           <div className="login-brand">
-            <img src="/atk-peru-wk.png?v=20261019" alt="ATK Altoque Perú WK" />
+            <img src={appAsset("/atk-peru-wk.png?v=20261019")} alt="ATK Altoque Perú WK" />
             <p>Sistema de tickets</p>
           </div>
-          <section className="login-card">
-            <h2>Acceso a sistemas</h2>
-            <p className="login-intro">Inicia sesión una sola vez con tu usuario de Registros ATK y luego elige Turnos o Registros.</p>
-            <a className="login-submit unified-login-link" href="/api/auth/portal">Continuar al inicio unificado</a>
-            {message && <p className="notice error">{message}</p>}
+          <section className="login-card session-check-card" role="status" aria-live="polite">
+            <span className="session-check-spinner" aria-hidden="true" />
+            <p>Abriendo el inicio de sesión…</p>
           </section>
         </div>
       </main>
@@ -1095,7 +1105,7 @@ export default function Home() {
     <main className={`app-shell${isWorker ? " worker-home-shell" : isLeader ? " leader-home-shell" : ""}`}>
       <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
         <div className="brand-mark">
-          <img src="/atk-peru-wk.png?v=20261019" alt="Altoque Perú WK" />
+          <img src={appAsset("/atk-peru-wk.png?v=20261019")} alt="Altoque Perú WK" />
         </div>
         <div className="side-user">
           <i>{data.user.name.slice(0, 2).toUpperCase()}</i>
@@ -1203,7 +1213,7 @@ export default function Home() {
           <div className="advisor-presence-list">
             {(data.advisorPresence || []).filter((advisor) => advisor.moduleNumber !== null).sort((a, b) => (a.moduleNumber || 99) - (b.moduleNumber || 99)).map((advisor) => {
               const name = advisor.name.includes(",") ? advisor.name.split(",").pop()?.trim().split(/\s+/)[0] : advisor.name.trim().split(/\s+/)[0];
-              const label = advisor.status === "OCCUPIED" ? "Ocupado" : advisor.status === "FREE" ? "Libre" : "No disponible";
+              const label = advisor.status === "OCCUPIED" ? "Ocupado" : advisor.status === "FREE" ? "Libre" : advisor.status === "PAUSED" ? "En pausa" : "No disponible";
               const presence = advisor.inLargeRoom ? "En sala" : label;
               return <div className={"advisor-presence-row " + advisor.status.toLowerCase()} key={advisor.id} title={advisor.name}>
                 <span className="advisor-presence-dot" aria-label={advisor.inLargeRoom ? `En sala · ${label}` : label} title={advisor.inLargeRoom ? `En sala · ${label}` : label} />
@@ -1219,7 +1229,7 @@ export default function Home() {
           onClick={async () => {
             ++refreshGeneration.current;
               window.sessionStorage.removeItem(TAB_AUTH_KEY);
-              await fetch("/api/auth/logout", { method: "POST" });
+              await appFetch("/api/auth/logout", { method: "POST" });
               ++refreshGeneration.current;
             setData(null);
             setTickets([]);
@@ -1323,7 +1333,7 @@ export default function Home() {
             onClick={async () => {
               ++refreshGeneration.current;
               window.sessionStorage.removeItem(TAB_AUTH_KEY);
-              await fetch("/api/auth/logout", { method: "POST" });
+              await appFetch("/api/auth/logout", { method: "POST" });
               ++refreshGeneration.current;
               setData(null);
               setTickets([]);
@@ -1918,7 +1928,7 @@ function LiveTicketRow({ ticket, canManage, onTransferred, isNext = false }: { t
   async function refreshAdvisors() {
     setError("");
     try {
-      const response = await fetch(`/api/tickets/${ticket.id}/transfer`, { cache: "no-store" });
+      const response = await appFetch(`/api/tickets/${ticket.id}/transfer`, { cache: "no-store" });
       const json = await response.json().catch(() => ({}));
       if (response.ok) { setAdvisors(json.advisors || []); setLargeRoom(json.largeRoom || null); }
       else setError(json.error || "No se pudo cargar el equipo disponible.");
@@ -1928,7 +1938,7 @@ function LiveTicketRow({ ticket, canManage, onTransferred, isNext = false }: { t
     if (!recipientId || busy) return;
     setBusy(true); setError("");
     try {
-      const response = await fetch(`/api/tickets/${ticket.id}/transfer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ recipientId: recipientId === "LARGE_ROOM" ? recipientId : Number(recipientId) }) });
+      const response = await appFetch(`/api/tickets/${ticket.id}/transfer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ recipientId: recipientId === "LARGE_ROOM" ? recipientId : Number(recipientId) }) });
       const json = await response.json().catch(() => ({}));
       if (!response.ok) { setError(json.error || "No se pudo transferir el ticket."); await refreshAdvisors(); return; }
       setExpanded(false);
@@ -1968,7 +1978,7 @@ function TicketTransfer({ ticketId, ticketCode, onTransferred }: { ticketId: num
   async function loadAdvisors() {
     setError("");
     try {
-      const response = await fetch(`/api/tickets/${ticketId}/transfer`, { cache: "no-store" });
+      const response = await appFetch(`/api/tickets/${ticketId}/transfer`, { cache: "no-store" });
       const json = await response.json().catch(() => ({}));
       if (response.ok) { setAdvisors(json.advisors || []); setLargeRoom(json.largeRoom || null); }
       else setError(json.error || "No se pudo cargar el equipo disponible.");
@@ -1978,7 +1988,7 @@ function TicketTransfer({ ticketId, ticketCode, onTransferred }: { ticketId: num
     if (!recipientId || busy) return;
     setBusy(true); setError("");
     try {
-      const response = await fetch(`/api/tickets/${ticketId}/transfer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ recipientId: recipientId === "LARGE_ROOM" ? recipientId : Number(recipientId) }) });
+      const response = await appFetch(`/api/tickets/${ticketId}/transfer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ recipientId: recipientId === "LARGE_ROOM" ? recipientId : Number(recipientId) }) });
       const json = await response.json().catch(() => ({}));
       if (!response.ok) { setError(json.error || "No se pudo transferir el ticket."); return; }
       await onTransferred(json.largeRoom ? `Sala grande · ${json.largeRoom.branchName} · ${json.largeRoom.advisorName}` : json.advisor.name);
@@ -2135,7 +2145,7 @@ function WorkerHistory({ tickets, banks, onChanged, managerMode = false, initial
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(`/api/tickets/${selected.id}/operations/${editingOperationId}`, {
+      const response = await appFetch(`/api/tickets/${selected.id}/operations/${editingOperationId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...editDraft, amount, debtRate: Number(editDraft.debtRate) }),
@@ -2153,7 +2163,7 @@ function WorkerHistory({ tickets, banks, onChanged, managerMode = false, initial
     }
   }
   async function loadHistoryRange(from: string, to: string) {
-    const response = await fetch(`/api/worker/history?${new URLSearchParams({ from, to })}`, { cache: "no-store" });
+    const response = await appFetch(`/api/worker/history?${new URLSearchParams({ from, to })}`, { cache: "no-store" });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.error || "No se pudo cargar el historial.");
     setHistoryTickets(result.tickets || []);
@@ -2188,7 +2198,7 @@ function WorkerHistory({ tickets, banks, onChanged, managerMode = false, initial
         setError("Completa el banco y un monto válido en cada operación.");
         return;
       }
-      const response = await fetch(`/api/tickets/${selected.id}/operations`, {
+      const response = await appFetch(`/api/tickets/${selected.id}/operations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ operations }),
@@ -2210,7 +2220,7 @@ function WorkerHistory({ tickets, banks, onChanged, managerMode = false, initial
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(`/api/tickets/${selected.id}/reactivate`, { method: "POST" });
+      const response = await appFetch(`/api/tickets/${selected.id}/reactivate`, { method: "POST" });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) { setError(result.error || "No se pudo reactivar el ticket."); return; }
       const code = selected.code;
@@ -2447,7 +2457,7 @@ function Leadership({
     const controller = new AbortController();
     setBranchComparisonLoading(true);
     setBranchComparisonError("");
-    void fetch(`/api/indicators/branches?${query}`, { cache: "no-store", signal: controller.signal })
+    void appFetch(`/api/indicators/branches?${query}`, { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         const result = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(result.error || "No se pudo cargar la comparación de sedes.");
@@ -2466,7 +2476,7 @@ function Leadership({
     const controller = new AbortController();
     setDistrictOriginsLoading(true);
     setDistrictOriginsError("");
-    void fetch(`/api/indicators/districts?${query}`, { cache: "no-store", signal: controller.signal })
+    void appFetch(`/api/indicators/districts?${query}`, { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         const result = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(result.error || "No se pudo cargar la procedencia de los clientes.");
@@ -2505,7 +2515,7 @@ function Leadership({
     setAnalysisQuery(query);
     const controller = new AbortController();
     setAnalysisLoading(true);
-    void fetch(`/api/analysis?${query}`, { cache: "no-store", signal: controller.signal }).then(async (response) => {
+    void appFetch(`/api/analysis?${query}`, { cache: "no-store", signal: controller.signal }).then(async (response) => {
       if (response.ok) setAnalysis((await response.json()).tickets || []);
       else throw new Error("No se pudieron cargar las atenciones.");
     }).catch((error) => { if (error.name !== "AbortError") setInfo(error.message || "No se pudieron cargar las atenciones."); })
@@ -2517,7 +2527,7 @@ function Leadership({
     onSelect(value);
   };
   const load = useCallback(async () => {
-    const r = await fetch("/api/admin");
+    const r = await appFetch("/api/admin");
     if (r.ok) setAdmin(await r.json());
   }, []);
   useEffect(() => {
@@ -2527,34 +2537,34 @@ function Leadership({
   }, [load]);
   async function saveServices(userId: number, ids: number[], moduleNumber: number | null, dni: string | null, available: boolean) {
     const payload: Record<string, unknown> = { action: "workerServices", userId, serviceIds: ids, moduleNumber, dni, available };
-    let r = await fetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    let r = await appFetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     let result = await r.json().catch(() => ({}));
     if (r.status === 409 && result.moduleConflict) {
       const conflict = result.moduleConflict as { id: number; name: string; moduleNumber: number };
       const confirmed = window.confirm(`El módulo ${conflict.moduleNumber} está ocupado por ${conflict.name}. ¿Quieres intercambiar los módulos? Los tickets activos seguirán asignados a cada colaborador y aparecerán en su módulo nuevo. Ambos quedarán disponibles para recibir nuevos turnos.`);
       if (!confirmed) { setInfo("No se hicieron cambios de módulo."); return; }
       payload.swapWithUserId = conflict.id;
-      r = await fetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      r = await appFetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       result = await r.json().catch(() => ({}));
     }
     setInfo(r.ok ? result.swapped ? `Módulos intercambiados.${result.activeTicketPreserved ? " Los tickets activos siguen con cada colaborador." : ""} Ambos quedaron disponibles.` : result.activeTicketPreserved ? "Módulo actualizado. El ticket activo sigue con el colaborador en su nuevo módulo, y quedó disponible para nuevos turnos." : "Cambios del usuario guardados." : result.error || "No se pudieron guardar los cambios.");
     if (r.ok) { setSelectedWorkerId(null); load(); }
   }
   async function saveWorkerBranch(userId: number, branchId: number) {
-    const r = await fetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "userBranch", userId, branchId }) });
+    const r = await appFetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "userBranch", userId, branchId }) });
     const result = await r.json().catch(() => ({}));
     setInfo(r.ok ? `Sede actualizada a ${result.branch}.` : result.error || "No se pudo cambiar la sede.");
     if (r.ok) load();
   }
   async function deleteUser(id: number, name: string) {
     if (!window.confirm(`¿Eliminar a ${name}? Si tiene tickets previos, se desactivará para conservar el historial.`)) return;
-    const r = await fetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "deleteUser", id }) });
+    const r = await appFetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "deleteUser", id }) });
     const result = await r.json().catch(() => ({}));
     setInfo(r.ok ? (result.deactivated ? "Usuario desactivado: su historial se conserva." : "Usuario eliminado.") : result.error || "No se pudo eliminar el usuario.");
     if (r.ok) { setSelectedWorkerId(null); load(); }
   }
   async function syncRegistrosUsers() {
-    const r = await fetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "syncRegistrosUsers" }) });
+    const r = await appFetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "syncRegistrosUsers" }) });
     const result = await r.json().catch(() => ({}));
     const conflicts = Array.isArray(result.conflicts) ? result.conflicts as string[] : [];
     const summary = `${result.count || 0} usuario(s) sincronizado(s) desde Registros ATK.`;
@@ -2562,7 +2572,7 @@ function Leadership({
     if (r.ok) load();
   }
   async function setUserAvailability(userId: number, available: boolean) {
-    const r = await fetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "setAvailability", userId, available }) });
+    const r = await appFetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "setAvailability", userId, available }) });
     const result = await r.json().catch(() => ({}));
     setInfo(r.ok ? (available ? "Atención activada." : "Atención desactivada.") : result.error || "No se pudo cambiar el estado.");
     if (r.ok) load();
@@ -2570,7 +2580,7 @@ function Leadership({
   async function saveRate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const f = new FormData(event.currentTarget);
-    const r = await fetch("/api/admin", {
+    const r = await appFetch("/api/admin", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -2587,7 +2597,7 @@ function Leadership({
     event.preventDefault();
     const form = event.currentTarget;
     const f = new FormData(event.currentTarget);
-    const r = await fetch("/api/admin", {
+    const r = await appFetch("/api/admin", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -2627,7 +2637,7 @@ function Leadership({
     setAnalysisQuery(q.toString());
     setAnalysisLoading(true);
     try {
-      const r = await fetch(`/api/analysis?${q}`, { cache: "no-store" });
+      const r = await appFetch(`/api/analysis?${q}`, { cache: "no-store" });
       if (!r.ok) throw new Error("No se pudieron cargar las atenciones.");
       setAnalysis((await r.json()).tickets || []);
     } catch (error) {
@@ -2637,7 +2647,7 @@ function Leadership({
     }
   }
   async function reloadAnalysis() {
-    const r = await fetch(`/api/analysis?${analysisQuery}`, { cache: "no-store" });
+    const r = await appFetch(`/api/analysis?${analysisQuery}`, { cache: "no-store" });
     if (r.ok) setAnalysis((await r.json()).tickets);
   }
   const workers = (admin?.users || []).filter((worker: any) => !data.selectedBranchId || worker.branchId === data.selectedBranchId);
@@ -3049,7 +3059,7 @@ function BankBrand({ name }: { name: string }) {
           : normalized.includes("banbif") ? "banbif" : "";
   if (!brand) return <>{name}</>;
   return <span className={`bank-brand bank-brand-${brand}`} role="img" aria-label={name} title={name}>
-    <img className={`bank-logo-image bank-logo-image-${brand}`} src={`/banks/${brand}.png`} alt="" />
+    <img className={`bank-logo-image bank-logo-image-${brand}`} src={appAsset(`/banks/${brand}.png`)} alt="" />
   </span>;
 }
 function BankSelect({ banks, value, defaultValue, onChange, name, placeholder = "Selecciona banco", ariaLabel = "Banco" }: {
@@ -3409,7 +3419,7 @@ function LargeRoomManagement({ branches, tickets, rooms, onRefresh }: {
     setBusy(true);
     setMessage("");
     try {
-      const response = await fetch("/api/admin/large-room", {
+      const response = await appFetch("/api/admin/large-room", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "assign", branchId, ticketIds: selectedTicketIds }),
       });
@@ -3472,7 +3482,7 @@ function FrequentClients({ onBack }: { onBack: () => void }) {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/indicators/frequent-clients", { cache: "no-store" });
+      const response = await appFetch("/api/indicators/frequent-clients", { cache: "no-store" });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || "No se pudo cargar la lista.");
       setClients(result.clients || []);
