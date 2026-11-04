@@ -32,6 +32,12 @@ async function main() {
   );
 
   const testPasswordHash = await bcrypt.hash("Demo123!", 10);
+  const localAdminPasswordHash = await bcrypt.hash("DemoAdmin123!", 10);
+  await prisma.user.upsert({
+    where: { username: "admin-local" },
+    update: { name: "Administrador local de prueba", passwordHash: localAdminPasswordHash, role: UserRole.ADMIN, active: true, branchId: null, moduleNumber: null },
+    create: { name: "Administrador local de prueba", username: "admin-local", passwordHash: localAdminPasswordHash, role: UserRole.ADMIN, active: true },
+  });
   for (let index = 1; index <= 6; index++) {
     const username = index === 1 ? "prueba" : `demo-asesor-${index}`;
     const passwordHash = index === 1 ? testPasswordHash : await bcrypt.hash(randomBytes(32).toString("hex"), 10);
@@ -64,7 +70,7 @@ async function main() {
       });
     }
   }
-  console.log("Base local demo lista: usuario prueba / contraseña Demo123! (módulo 1).");
+  console.log("Base local demo lista: admin-local / DemoAdmin123!; asesor prueba / Demo123! (módulo 1).");
 }
 
 main().finally(() => prisma.$disconnect());

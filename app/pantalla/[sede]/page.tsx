@@ -43,49 +43,18 @@ export default function PantallaPublica() {
   const [state, setState] = useState<QueueState | null>(null);
   const [now, setNow] = useState<Date | null>(null);
   const [justCalled, setJustCalled] = useState<string | null>(null);
-  const [voiceEnabled, setVoiceEnabled] = useState(true);
-  const [voiceError, setVoiceError] = useState<string | null>(null);
-  const [voiceTestMode, setVoiceTestMode] = useState<boolean | null>(null);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [soundTestMode, setSoundTestMode] = useState<boolean | null>(null);
   const previousCodes = useRef<Set<string>>(new Set());
   const firstLoad = useRef(true);
-  const voiceEnabledRef = useRef(true);
-  const announcedCodes = useRef<Set<string>>(new Set());
-  const announcementAudio = useRef<HTMLAudioElement | null>(null);
-
-  async function announceTicket(ticket: TicketOnScreen) {
-    const announcementId = `${ticket.code}|${ticket.startedAt || ""}`;
-    if (announcedCodes.current.has(announcementId)) return;
-    announcedCodes.current.add(announcementId);
-    try {
-      const query = new URLSearchParams({ branch: code, ticket: ticket.code });
-      if (ticket.testOnly) query.set("test", "1");
-      const response = await appFetch(`/api/public/announcement?${query}`, { cache: "no-store" });
-      if (!response.ok) {
-        const result = await response.json().catch(() => null);
-        throw new Error(result?.error || `No se pudo generar la voz (${response.status}).`);
+  function toggleSound() {
+    setSoundEnabled((enabled) => {
+      if (!enabled) {
+        // El gesto del usuario desbloquea la reproducción en navegadores de TV.
+        attentionChime();
       }
-      const audioUrl = URL.createObjectURL(await response.blob());
-      const audio = new Audio(audioUrl);
-      announcementAudio.current?.pause();
-      announcementAudio.current = audio;
-      audio.onended = () => URL.revokeObjectURL(audioUrl);
-      audio.onerror = () => URL.revokeObjectURL(audioUrl);
-      await audio.play();
-      setVoiceError(null);
-    } catch (error) {
-      announcedCodes.current.delete(announcementId);
-      setVoiceError(error instanceof Error ? error.message : "No se pudo reproducir la voz.");
-      attentionChime();
-    }
-  }
-
-  function enableVoice() {
-    voiceEnabledRef.current = true;
-    setVoiceEnabled(true);
-    // El gesto del usuario desbloquea la reproducción de audio en navegadores de TV.
-    attentionChime();
-    setVoiceError(null);
-    if (callingTickets.length) announceTicket(callingTickets[0]);
+      return !enabled;
+    });
   }
 
   useEffect(() => {
@@ -95,11 +64,11 @@ export default function PantallaPublica() {
   }, []);
 
   useEffect(() => {
-    setVoiceTestMode(new URLSearchParams(window.location.search).get("pruebaVoz") === "1");
+    setSoundTestMode(new URLSearchParams(window.location.search).get("pruebaVoz") === "1");
   }, []);
 
   useEffect(() => {
-    if (voiceTestMode === null) return;
+    if (soundTestMode === null) return;
     let cancelled = false;
     async function poll() {
       try {
@@ -108,12 +77,11 @@ export default function PantallaPublica() {
         if (cancelled) return;
         if (!response.ok) { setState({ branch: null, calling: [], waitingCount: 0, nextTickets: [], recentlyCompleted: [], error: json.error }); return; }
         const currentCodes = new Set<string>(json.calling.map((ticket: TicketOnScreen) => ticket.code));
-        if (!voiceTestMode && !firstLoad.current) {
+        if (!soundTestMode && !firstLoad.current) {
           const fresh = json.calling.find((ticket: TicketOnScreen) => !previousCodes.current.has(ticket.code));
           if (fresh) {
             setJustCalled(fresh.code);
             setTimeout(() => setJustCalled(null), 5500);
-            if (voiceEnabledRef.current) void announceTicket(fresh);
           }
         }
         firstLoad.current = false;
@@ -124,7 +92,7 @@ export default function PantallaPublica() {
     poll();
     const interval = setInterval(poll, 3500);
     return () => { cancelled = true; clearInterval(interval); };
-  }, [code, voiceTestMode]);
+  }, [code, soundTestMode]);
 
   const testTicket: TicketOnScreen = {
     code: "PRUEBA-VOZ",
@@ -134,17 +102,14 @@ export default function PantallaPublica() {
     testOnly: true,
     service: { name: "Prueba de audio · no se registra" },
   };
-  const callingTickets = voiceTestMode === true ? [testTicket] : state?.calling.slice(0, 3) || [];
+  const callingTickets = soundTestMode === true ? [testTicket] : state?.calling.slice(0, 3) || [];
   const callingSignature = callingTickets.map((ticket) => ticket.code).join("|");
   useEffect(() => {
-    if (voiceEnabled && callingTickets.length) void announceTicket(callingTickets[0]);
-  }, [voiceEnabled, callingSignature]);
-  useEffect(() => {
-    if (!callingSignature) return;
+    if (!soundEnabled || !callingSignature) return;
     attentionChime();
     const repeat = setInterval(attentionChime, 4800);
     return () => clearInterval(repeat);
-  }, [callingSignature]);
+  }, [soundEnabled, callingSignature]);
 
   if (state?.error) return <main className="screen-page"><p className="screen-error">{state.error}</p></main>;
 
@@ -158,10 +123,9 @@ export default function PantallaPublica() {
         <img className="screen-logo" src={appAsset("/atk-peru-wk.png?v=20261019")} alt="ATK Altoque Perú WK" />
         <div className="screen-header-tools">
           <div className="screen-audio-control">
-            <button className={`screen-audio-button ${voiceEnabled && !voiceError ? "is-enabled" : ""}`} type="button" onClick={enableVoice} aria-pressed={voiceEnabled} title={voiceError || "Anuncios de turno con voz de ElevenLabs."}>
-              {voiceError ? "⚠ Reintentar voz" : "🔊 Voz activada"}
+            <button className={`screen-audio-button ${soundEnabled ? "is-enabled" : ""}`} type="button" onClick={toggleSound} aria-pressed={soundEnabled} title={soundEnabled ? "Desactivar sonido de llamada." : "Activar sonido de llamada."}>
+              {soundEnabled ? "🔊 Sonido activado" : "🔇 Sonido desactivado"}
             </button>
-            {voiceError && <small className="screen-audio-error" role="alert">{voiceError}</small>}
           </div>
           <div className="screen-meta">
             <span className="screen-location"><span aria-hidden="true">●</span>{state?.branch?.name || "Cargando sede…"}</span>
@@ -176,14 +140,14 @@ export default function PantallaPublica() {
       <section className={`screen-call-grid calls-${Math.max(callingTickets.length, 1)}`}>
         {callingTickets.length ? callingTickets.map((ticket) => (
           <article className={`call-card current-call calling ${ticket.code === justCalled ? "flash" : ""}`} key={ticket.code}>
-            <div className="call-card-top"><span>{ticket.testOnly ? "🔊 PRUEBA DE VOZ" : "🔊 TURNO ACTUAL"}</span><b>{ticket.module ? `MÓDULO ${ticket.module}` : "LLAMANDO"}</b></div>
+            <div className="call-card-top"><span>{ticket.testOnly ? "🔊 PRUEBA DE SONIDO" : "🔊 TURNO ACTUAL"}</span><b>{ticket.module ? `MÓDULO ${ticket.module}` : "LLAMANDO"}</b></div>
             <strong className="call-code">{ticket.code}</strong><h1>{ticket.displayName}</h1><p className="call-service">{ticket.service.name}</p><div className="call-instruction">🔊 <b>{ticket.module ? `Dirígete al módulo ${ticket.module}` : "Acércate para ser atendido"}</b></div>
           </article>
         )) : (
           <article className="call-card current-call"><div className="call-card-top"><span>🔊 TURNOS ACTUALES</span><b>EN ESPERA</b></div><strong className="call-code dim-code">—</strong><h1>Esperando llamado</h1><p className="call-service">El próximo ticket aparecerá aquí</p></article>
         )}
       </section>
-      <section className="screen-upcoming"><div className="upcoming-title"><span>{voiceTestMode ? "🧪 MODO DE PRUEBA" : "📋 SIGUIENTES EN SER LLAMADOS"}</span><b>{voiceTestMode ? "Sin cambios en el sistema" : `${state?.waitingCount || 0} en espera`}</b></div><div className="screen-next-list">{voiceTestMode ? <p className="screen-empty">Turno ficticio solo para comprobar el audio. No se guarda ni aparece en la cola.</p> : upcoming.length ? upcoming.map((ticket, index) => <div className="screen-next" key={ticket.code}><i>{index + 1}</i><b>{ticket.code}{ticket.isPreferential && <small className="preferential-badge">Preferencial</small>}</b><span>{ticket.displayName} · {ticket.service.name}</span></div>) : <p className="screen-empty">No hay más tickets en espera.</p>}</div></section>
+      <section className="screen-upcoming"><div className="upcoming-title"><span>{soundTestMode ? "🧪 MODO DE PRUEBA" : "📋 SIGUIENTES EN SER LLAMADOS"}</span><b>{soundTestMode ? "Sin cambios en el sistema" : `${state?.waitingCount || 0} en espera`}</b></div><div className="screen-next-list">{soundTestMode ? <p className="screen-empty">Turno ficticio solo para comprobar el sonido. No se guarda ni aparece en la cola.</p> : upcoming.length ? upcoming.map((ticket, index) => <div className="screen-next" key={ticket.code}><i>{index + 1}</i><b>{ticket.code}{ticket.isPreferential && <small className="preferential-badge">Preferencial</small>}</b><span>{ticket.displayName} · {ticket.service.name}</span></div>) : <p className="screen-empty">No hay más tickets en espera.</p>}</div></section>
     </main>
   );
 }

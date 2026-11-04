@@ -1,4 +1,5 @@
 const PANCAKE_API = "https://pages.fm/api/public_api/v1";
+const PANCAKE_API_V2 = "https://pages.fm/api/public_api/v2";
 
 export type PancakeConnectionResult =
   | { configured: false; connected: false }
@@ -15,9 +16,102 @@ export type PancakeCustomerSearchResult =
   | { ok: true; total: number; scanned: number; complete: boolean; customers: PancakeCustomerName[] }
   | { ok: false; reason: "not_configured" | "unauthorized" | "unavailable" | "api_rejected" | "invalid_response"; code?: string | number | null };
 
+export type PancakeDniCustomer = { alias: string | null; profileName: string | null; notes: string[]; conversationUpdatedAt: string | null };
+export type PancakeDniLookupResult =
+  | { ok: true; found: boolean; complete: boolean; scanned: number; customer: PancakeDniCustomer | null }
+  | { ok: false; reason: "not_configured" | "unauthorized" | "unavailable" | "api_rejected" | "invalid_response"; code?: string | number | null };
+
 const PANCAKE_CUSTOMER_SEARCH_START = 946684800; // 2000-01-01 UTC
 const PANCAKE_CUSTOMER_SEARCH_PAGE_SIZE = 100;
 const PANCAKE_CUSTOMER_SEARCH_MAX_PAGES = 250;
+const PANCAKE_CONVERSATION_SEARCH_MAX_PAGES = 100;
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function pancakeString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function notesFromCustomer(value: unknown): string[] {
+  if (typeof value === "string") return value.trim() ? [value.trim()] : [];
+  if (Array.isArray(value)) return value.flatMap(notesFromCustomer);
+  const record = asRecord(value);
+  if (!record) return [];
+  const message = pancakeString(record.message) ?? pancakeString(record.content) ?? pancakeString(record.note);
+  return message ? [message] : [];
+}
+
+/** Searches conversation aliases (where Pancake stores the DNI) and returns the customer's saved profile and notes. */
+export async function lookupPancakeCustomerByDni(dni: string): Promise<PancakeDniLookupResult> {
+  const pageId = process.env.PANCAKE_PAGE_ID?.trim();
+  const pageToken = process.env.PANCAKE_PAGE_ACCESS_TOKEN?.trim();
+  if (!pageId || !pageToken) return { ok: false, reason: "not_configured" };
+
+  let cursor: string | null = null;
+  let scanned = 0;
+  let found: PancakeDniCustomer = {
+    alias: null, profileName: null, notes: [], conversationUpdatedAt: null,
+  };
+  const digits = dni.replace(/\D/g, "");
+
+  try {
+    for (let page = 0; page < PANCAKE_CONVERSATION_SEARCH_MAX_PAGES; page += 1) {
+      const query = new URLSearchParams({ page_access_token: pageToken, page_size: "60" });
+      if (cursor) query.set("last_conversation_id", cursor);
+      const response = await fetch(`${PANCAKE_API_V2}/pages/${encodeURIComponent(pageId)}/conversations?${query}`, {
+        method: "GET", cache: "no-store", signal: AbortSignal.timeout(15000),
+      });
+      if (response.status === 401 || response.status === 403) return { ok: false, reason: "unauthorized" };
+      if (!response.ok) return { ok: false, reason: "unavailable" };
+      const payload = asRecord(await response.json().catch(() => null));
+      if (!payload) return { ok: false, reason: "invalid_response" };
+      if (payload.success === false) return { ok: false, reason: "api_rejected", code: (payload.error_code as string | number | null) ?? null };
+      const conversations = Array.isArray(payload.conversations) ? payload.conversations : Array.isArray(payload.data) ? payload.data : null;
+      if (!conversations) return { ok: false, reason: "invalid_response" };
+      scanned += conversations.length;
+
+      for (const item of conversations) {
+        const conversation = asRecord(item);
+        if (!conversation) continue;
+        const sender = asRecord(conversation.from);
+        const customers = Array.isArray(conversation.customers) ? conversation.customers.map(asRecord).filter(Boolean) as Record<string, unknown>[] : [];
+        const pageCustomer = asRecord(conversation.page_customer) ?? customers.map((customer) => asRecord(customer.page_customer)).find(Boolean) ?? null;
+        const aliases = [pancakeString(sender?.alias), ...customers.map((customer) => pancakeString(customer.alias)), pancakeString(pageCustomer?.alias)].filter((alias): alias is string => Boolean(alias));
+        const matchingAlias = aliases.find((alias) => alias.replace(/\D/g, "").includes(digits));
+        if (!matchingAlias) continue;
+
+        const noteValues = [pageCustomer?.notes, ...customers.map((customer) => customer.notes)].flatMap(notesFromCustomer);
+        const uniqueNotes = [...new Set(noteValues)];
+        found = {
+          alias: matchingAlias,
+          profileName: pancakeString(pageCustomer?.name) ?? customers.map((customer) => pancakeString(customer.name)).find(Boolean) ?? pancakeString(sender?.name),
+          notes: uniqueNotes,
+          conversationUpdatedAt: pancakeString(conversation.updated_at),
+        };
+        // Prefer the most recently encountered match; Pancake returns newest first.
+        break;
+      }
+      if (found.alias) break;
+      if (conversations.length < 60) break;
+      const lastConversation = asRecord(conversations[conversations.length - 1]);
+      const nextCursor = pancakeString(payload.last_conversation_id) ?? pancakeString(payload.next_cursor) ?? pancakeString(lastConversation?.id);
+      if (!nextCursor || nextCursor === cursor) break;
+      cursor = nextCursor;
+    }
+
+    return {
+      ok: true,
+      found: Boolean(found.alias),
+      complete: Boolean(found.alias) || scanned < PANCAKE_CONVERSATION_SEARCH_MAX_PAGES * 60,
+      scanned,
+      customer: found.alias ? found : null,
+    };
+  } catch {
+    return { ok: false, reason: "unavailable" };
+  }
+}
 
 /** Checks the page token with Pancake without returning customer data or the token. */
 export async function checkPancakeConnection(): Promise<PancakeConnectionResult> {

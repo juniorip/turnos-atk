@@ -1,6 +1,6 @@
 import { UserRole } from "@prisma/client";
 import { errorResponse, requireUser } from "@/lib/auth";
-import { listPancakeCustomerNames, searchPancakeCustomersByDni } from "@/lib/pancake";
+import { listPancakeCustomerNames, lookupPancakeCustomerByDni } from "@/lib/pancake";
 
 export const maxDuration = 60;
 
@@ -19,9 +19,9 @@ export async function GET(request: Request) {
       if (dni.length < 8 || dni.length > 12) {
         return Response.json({ ok: false, error: "Ingresa un DNI válido de 8 a 12 dígitos." }, { status: 400 });
       }
-      const result = await searchPancakeCustomersByDni(dni);
+      const result = await lookupPancakeCustomerByDni(dni);
       const status = result.ok ? 200 : result.reason === "not_configured" ? 503 : 502;
-      return Response.json({ ...result, dni, matchedField: "name" }, { status, headers: { "Cache-Control": "no-store" } });
+      return Response.json({ ...result, dni, matchedField: "alias" }, { status, headers: { "Cache-Control": "no-store" } });
     }
 
     const days = positiveInteger(params.get("days"), 30, 365);

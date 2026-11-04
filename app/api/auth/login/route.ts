@@ -64,7 +64,9 @@ export async function POST(request: Request) {
   const parsed=schema.safeParse(await request.json()); if(!parsed.success) return Response.json({error:"Completa usuario y contraseña."},{status:400});
   let user;
   try {
-    const localDemoMode = process.env.NODE_ENV === "development" && process.env.TURNOS_LOCAL_DEMO_AUTH === "1" && !process.env.REGISTROS_ATK_URL;
+    // Explicit local-demo mode must not depend on a separate Registros server
+    // being available. This branch is development-only and never used in prod.
+    const localDemoMode = process.env.NODE_ENV === "development" && process.env.TURNOS_LOCAL_DEMO_AUTH === "1";
     if (localDemoMode) {
       // This fallback is opt-in and development-only. It authenticates solely
       // against the isolated local database and cannot affect production login.
