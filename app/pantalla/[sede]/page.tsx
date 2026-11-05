@@ -97,7 +97,7 @@ export default function PantallaPublica() {
   useEffect(() => {
     if (!soundEnabled || !callingSignature) return;
     attentionChime();
-    const repeat = setInterval(attentionChime, 4800);
+    const repeat = setInterval(attentionChime, 10_000);
     return () => {
       clearInterval(repeat);
       callAudio.current?.pause();

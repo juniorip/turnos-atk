@@ -16,7 +16,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     if (!ticket) return Response.json({ error: "Ticket no disponible." }, { status: 404 });
     const refresh = new URL(request.url).searchParams.get("refresh") === "1";
     const cached = await readTicketPancake(ticket);
-    if (refresh || cached.state === "pending") {
+    if (refresh) {
+      after(() => fillTicketPancake(ticket, true));
+      return Response.json({ state: "pending" }, { status: 202, headers: { "Cache-Control": "no-store" } });
+    }
+    if (cached.state === "pending") {
       after(() => fillTicketPancake(ticket, refresh));
       return Response.json({ state: "pending" }, { status: 202, headers: { "Cache-Control": "no-store" } });
     }

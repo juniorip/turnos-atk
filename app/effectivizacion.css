@@ -4,6 +4,7 @@
   border-radius: var(--radius-sm); background: var(--ok-soft); color: #bdeed2; font-size: 0.8rem;
 }
 .operation-preview b { color: var(--ok); }
+.effectivization-total { margin-top: 10px; }
 @media (max-width: 720px) {
   .effective-operation { grid-template-columns: 1fr 1fr; }
   .effective-operation input { grid-column: auto; }

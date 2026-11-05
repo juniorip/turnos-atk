@@ -17,6 +17,8 @@ test('slash-separated cards and cards repeated in other notes keep the correct b
   ]);
   assert.deepEqual(extractCards(['BCP 1234 / BBVA 5678']).map(card => [card.bankId, card.lastFour]), [['bcp', '1234'], ['bbva', '5678']]);
   assert.deepEqual(extractCards(['1234/5678 BCP / 9012/3456 BBVA']).map(card => [card.bankId, card.lastFour]), [['bcp', '1234'], ['bcp', '5678'], ['bbva', '9012'], ['bbva', '3456']]);
+  assert.deepEqual(extractCards(['0050 - 5267 BCP 19193980484079']).map(card => [card.bankId, card.lastFour]), [['bcp', '0050'], ['bcp', '5267']]);
+  assert.deepEqual(extractAccounts(['0050 - 5267 BCP 19193980484079']).map(account => account.account), ['19193980484079']);
 });
 
 test('account groups, CCI, dates, phone numbers, DNI and commission numbers are not card endings', () => {

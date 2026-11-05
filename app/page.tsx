@@ -5,6 +5,7 @@ import { LIMA_DISTRICTS } from "@/lib/lima-districts";
 import { appAsset, appFetch } from "@/lib/app-fetch";
 import PancakeRegistration, { type PancakeRegistrationStatus } from "./components/pancake-registration";
 import PancakeCustomerDetails from "./components/pancake-customer-details";
+import BankLogo from "./components/bank-logo";
 import type { PancakeDniCustomer } from "@/lib/pancake";
 import AutomaticEfectivization from "./components/automatic-efectivization";
 import { customerProfile, getRegisteredCards, profileCommissionPlan, type CustomerProfile } from "@/lib/registered-cards";
@@ -150,7 +151,7 @@ const statusLabels: Record<string, string> = {
   FAILED: "Fallido",
   CANCELLED: "Cancelado",
 };
-const MAX_ACTIVE_TICKETS = 2;
+const MAX_ACTIVE_TICKETS = 5;
 
 type NavIconName = "queue" | "home" | "chart" | "team" | "trend" | "settings" | "room" | "ticket" | "history";
 function NavIcon({ name }: { name: NavIconName }) {
@@ -377,16 +378,94 @@ export default function Home() {
     [section, setSection] = useState("summary"),
     [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedClaimId, setSelectedClaimId] = useState<number | null>(null);
+  const operationDraftsByTicket = useRef(new Map<number, OperationDraft[]>());
+  const currentOperationTicketId = useRef<number | null>(null);
+  const discardedOperationDrafts = useRef(new Set<number>());
   const [pancakeRegistration, setPancakeRegistration] = useState<{ ticketId: number; status: PancakeRegistrationStatus } | null>(null);
+  const [manualPancakeRegisteredTickets, setManualPancakeRegisteredTickets] = useState<Set<number>>(() => new Set());
+  const [pancakeStatusesByTicket, setPancakeStatusesByTicket] = useState<Record<number, PancakeRegistrationStatus>>({});
   const [pancakeCustomer, setPancakeCustomer] = useState<{ ticketId: number; customer: PancakeDniCustomer | null; checkedAt: string | null } | null>(null);
+  const pancakeCustomersByTicket = useRef(new Map<number, { customer: PancakeDniCustomer | null; checkedAt: string | null }>());
+  const activeTicketsForPancake = useRef(activeTickets);
+  const pancakeStatusesForPolling = useRef(pancakeStatusesByTicket);
+  const manualTicketsForPolling = useRef(manualPancakeRegisteredTickets);
+  const currentTicketForPolling = useRef<number | null>(current?.id ?? null);
+  const pancakePollingAllowed = useRef(false);
+  const pancakeBatchInFlight = useRef(false);
+  activeTicketsForPancake.current = activeTickets;
+  pancakeStatusesForPolling.current = pancakeStatusesByTicket;
+  manualTicketsForPolling.current = manualPancakeRegisteredTickets;
+  currentTicketForPolling.current = current?.id ?? null;
+  pancakePollingAllowed.current = Boolean(data && !data.previewMode && ["WORKER", "MANAGER"].includes(data.user.role));
   const handlePancakeCustomer = useCallback((ticketId: number, customer: PancakeDniCustomer | null, checkedAt: string | null) => {
+    pancakeCustomersByTicket.current.set(ticketId, { customer, checkedAt });
     if (ticketId === current?.id) setPancakeCustomer({ ticketId, customer, checkedAt });
   }, [current?.id]);
   const handlePancakeStatus = useCallback((ticketId: number, status: PancakeRegistrationStatus) => {
+    setPancakeStatusesByTicket((previous) => previous[ticketId] === status ? previous : { ...previous, [ticketId]: status });
     if (ticketId !== current?.id) return;
     setPancakeRegistration({ ticketId, status });
-    if (status === "registered") setRegistrationRequested(false);
+    if (status === "registered" || status === "registered-manual") setRegistrationRequested(false);
   }, [current?.id]);
+  useEffect(() => {
+    let disposed = false;
+    const pollActiveTickets = async () => {
+      if (disposed || document.visibilityState !== "visible" || pancakeBatchInFlight.current || !pancakePollingAllowed.current) return;
+      if (window.sessionStorage.getItem(TAB_AUTH_KEY) !== "1") return;
+      const unresolved = activeTicketsForPancake.current
+        .filter((ticket) => ["CALLED", "IN_SERVICE"].includes(ticket.status))
+        .filter((ticket) => !manualTicketsForPolling.current.has(ticket.id))
+        .filter((ticket) => !["registered", "registered-manual", "loading"].includes(pancakeStatusesForPolling.current[ticket.id] || ""))
+        .map((ticket) => ticket.id);
+      if (!unresolved.length) return;
+      pancakeBatchInFlight.current = true;
+      try {
+        const response = await appFetch("/api/tickets/pancake-refresh-active", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ticketIds: unresolved }),
+          cache: "no-store",
+          signal: AbortSignal.timeout(55_000),
+        });
+        if (!response.ok || disposed) return;
+        const payload = await response.json();
+        for (const ticket of payload.tickets || []) {
+          if (ticket.state !== "ready" || !ticket.result) continue;
+          const result = ticket.result as { ok: boolean; found?: boolean; complete?: boolean; customer?: PancakeDniCustomer | null };
+          const status: PancakeRegistrationStatus = !result.ok
+            ? "unavailable"
+            : result.found
+              ? "registered"
+              : result.complete
+                ? "not-found"
+                : "incomplete";
+          const ticketId = Number(ticket.ticketId);
+          setPancakeStatusesByTicket((previous) => previous[ticketId] === status ? previous : { ...previous, [ticketId]: status });
+          const checkedAt = ticket.checkedAt || null;
+          pancakeCustomersByTicket.current.set(ticketId, { customer: result.customer || null, checkedAt });
+          if (currentTicketForPolling.current === ticketId) {
+            setPancakeRegistration({ ticketId, status });
+            setPancakeCustomer({ ticketId, customer: result.customer || null, checkedAt });
+            if (status === "registered") setRegistrationRequested(false);
+          }
+        }
+      } catch {
+        // A transient network failure will be retried on the next minute.
+      } finally {
+        pancakeBatchInFlight.current = false;
+      }
+    };
+    const timer = window.setInterval(() => void pollActiveTickets(), 60_000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, []);
+  const handleManualPancakeRegisteredChange = useCallback((ticketId: number, registered: boolean) => {
+    setManualPancakeRegisteredTickets((previous) => {
+      const next = new Set(previous);
+      if (registered) next.add(ticketId);
+      else next.delete(ticketId);
+      return next;
+    });
+  }, []);
   const canRegisterCurrentClient = pancakeRegistration?.ticketId === current?.id && pancakeRegistration?.status === "not-found";
   const [roomActionLoading, setRoomActionLoading] = useState(false);
   const [selectedRoomTicketIds, setSelectedRoomTicketIds] = useState<number[]>([]);
@@ -599,10 +678,31 @@ export default function Home() {
     }
   }, [adminBranchId, browserNotifications, data?.previewMode, data?.stats.waiting, data?.user.role]);
   useEffect(() => {
-    setOperations([]);
+    const nextTicketId = current?.id ?? null;
+    const previousTicketId = currentOperationTicketId.current;
+    if (previousTicketId === nextTicketId) {
+      if (nextTicketId !== null) operationDraftsByTicket.current.set(nextTicketId, operations);
+      return;
+    }
+    if (previousTicketId !== null) {
+      if (discardedOperationDrafts.current.has(previousTicketId)) {
+        operationDraftsByTicket.current.delete(previousTicketId);
+        discardedOperationDrafts.current.delete(previousTicketId);
+      } else {
+        operationDraftsByTicket.current.set(previousTicketId, operations);
+      }
+    }
+    currentOperationTicketId.current = nextTicketId;
+    const restoredOperations = nextTicketId === null ? [] : operationDraftsByTicket.current.get(nextTicketId) || [];
+    setOperations(restoredOperations);
     setEscalation(null);
     setRegistrationRequested(false);
     setUploadPlatform("WEB");
+  }, [current?.id, operations]);
+  useEffect(() => {
+    const ticketId = current?.id;
+    const savedCustomer = ticketId === undefined ? undefined : pancakeCustomersByTicket.current.get(ticketId);
+    setPancakeCustomer(savedCustomer && ticketId !== undefined ? { ticketId, ...savedCustomer } : null);
   }, [current?.id]);
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -807,7 +907,6 @@ export default function Home() {
         return;
       }
       setCurrent(json.ticket);
-      setOperations([]);
       setEscalation(null);
       setRegistrationRequested(false);
       setUploadPlatform("WEB");
@@ -841,7 +940,6 @@ export default function Home() {
         return;
       }
       setCurrent(json.ticket);
-      setOperations([]);
       setEscalation(null);
       setRegistrationRequested(false);
       setUploadPlatform("WEB");
@@ -906,7 +1004,10 @@ export default function Home() {
     }
   }
   async function onManagerTicketTransferred(ticket: Ticket, advisorName: string) {
-    if (current?.id === ticket.id) setCurrent(null);
+    if (current?.id === ticket.id) {
+      discardedOperationDrafts.current.add(ticket.id);
+      setCurrent(null);
+    }
     setMessage(`${ticket.code} fue transferido a ${advisorName}.`);
     await refresh();
   }
@@ -976,6 +1077,7 @@ export default function Home() {
       }
       if (status === "FAILED") {
         ++refreshGeneration.current;
+        discardedOperationDrafts.current.add(current.id);
         setActiveTickets((previous) => previous.filter((ticket) => ticket.id !== current.id));
         setTickets((previous) => previous.filter((ticket) => ticket.id !== current.id));
         setCurrent(null);
@@ -1047,6 +1149,7 @@ export default function Home() {
         return;
       }
       ++refreshGeneration.current;
+      discardedOperationDrafts.current.add(current.id);
       setActiveTickets((previous) => previous.filter((ticket) => ticket.id !== current.id));
       setCurrent(null);
       setOperations([]);
@@ -1554,7 +1657,7 @@ export default function Home() {
                     <button type="button" className={multipleAttention ? "multi-toggle active" : "multi-toggle"} onClick={() => void toggleMultipleAttention()} disabled={multipleAttentionSaving}>{multipleAttentionSaving ? "Guardando…" : multipleAttention ? "Desactivar" : "Activar"}</button>
                   </div>
                   {activeTickets.length > 1 && <div className="multi-ticket-list" aria-label="Tickets activos">
-                    {activeTickets.map((ticket) => <button type="button" key={ticket.id} className={current?.id === ticket.id ? "multi-ticket selected" : "multi-ticket"} onClick={() => { setCurrent(ticket); setOperations([]); setEscalation(null); setRegistrationRequested(false); setUploadPlatform("WEB"); }}><b>{ticket.code}</b><span>{ticket.clientName}</span><small>{statusLabels[ticket.status] || ticket.status}</small></button>)}
+                    {activeTickets.map((ticket) => <button type="button" key={ticket.id} className={current?.id === ticket.id ? "multi-ticket selected" : "multi-ticket"} onClick={() => setCurrent(ticket)}><b>{ticket.code}</b><span>{ticket.clientName}</span><small>{statusLabels[ticket.status] || ticket.status}</small></button>)}
                   </div>}
                   {multipleAttention && <div className="multi-call-row">
                     <span>{activeTicketLimitReached ? `Tienes ${activeTickets.length} tickets activos. Finaliza o deriva uno para liberar un cupo.` : current?.status === "IN_SERVICE" || current?.status === "CALLED" ? "Puedes llamar otro cliente mientras tengas un cupo activo." : "Llama al siguiente cliente de la cola compartida."}</span>
@@ -1562,16 +1665,13 @@ export default function Home() {
                   </div>}
                 </div>
               )}
-              <span className="eyebrow">ATENCIÓN ACTUAL</span>
               {current ? current.status === "CALLED" ? (
                 <div className="called-ticket">
-                  <span className="eyebrow">🔔 LLAMADO EN PANTALLA</span>
-                  <div className="current-client-heading"><div className="current-client-title"><h2>{current.code} · {current.clientName}</h2><PancakeRegistration key={current.id} ticketId={current.id} onStatusChange={handlePancakeStatus} onCustomerChange={handlePancakeCustomer} /></div><span className="current-client-dni">DNI {current.dni}</span></div>
-                  {pancakeCustomer?.ticketId === current.id && pancakeCustomer.customer && <PancakeCustomerDetails customer={pancakeCustomer.customer} checkedAt={pancakeCustomer.checkedAt} />}
+                  <div className="current-attention-meta"><span className="eyebrow">LLAMANDO</span><span>Llegó: {new Date(current.arrivedAt).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })} · Espera: <ElapsedClock since={current.arrivedAt} until={current.startedAt} /></span></div>
+                  <div className="current-client-heading"><div className="current-client-title"><h2>{current.code} · {current.clientName}</h2><TicketTransfer ticketId={current.id} ticketCode={current.code} onTransferred={async (advisorName) => { ++refreshGeneration.current; discardedOperationDrafts.current.add(current.id); setCurrent(null); setMessage(`${current.code} fue transferido a ${advisorName}.`); await refresh(); }} /></div><span className="current-client-dni">DNI {current.dni}</span></div>
                   {current.isPreferential && <span className="preferential-badge">Preferencial</span>}
                   <p>{current.service.name}</p>
                   <p className="called-copy">El ticket seguirá apareciendo y sonando en la TV hasta que confirmes que el cliente se acercó.</p>
-                  <TicketTransfer ticketId={current.id} ticketCode={current.code} onTransferred={async (advisorName) => { ++refreshGeneration.current; setCurrent(null); setMessage(`${current.code} fue transferido a ${advisorName}.`); await refresh(); }} />
                   <div className="current-actions">
                     <button onClick={() => resolveCall("IN_SERVICE")} disabled={loading}>✓ En atención</button>
                     <button className="danger" onClick={() => resolveCall("FAILED")} disabled={loading}>No se acercó · Fallido</button>
@@ -1579,20 +1679,11 @@ export default function Home() {
                 </div>
               ) : (
                 <>
-                  <div className="current-client-heading"><div className="current-client-title"><h2>{current.code} · {current.clientName}</h2><PancakeRegistration key={current.id} ticketId={current.id} onStatusChange={handlePancakeStatus} onCustomerChange={handlePancakeCustomer} /></div><span className="current-client-dni">DNI {current.dni}</span></div>
+                  <div className="current-attention-meta"><span className="eyebrow">ATENCIÓN ACTUAL</span><span>Llegó: {new Date(current.arrivedAt).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })} · Espera: <ElapsedClock since={current.arrivedAt} until={current.startedAt} />{current.startedAt && <> · Atención: <ElapsedClock since={current.startedAt} /></>}</span></div>
+                  <div className="current-client-heading"><div className="current-client-title"><h2>{current.code} · {current.clientName}</h2><PancakeRegistration key={current.id} ticketId={current.id} manualRegistered={manualPancakeRegisteredTickets.has(current.id)} statusOverride={pancakeStatusesByTicket[current.id]} onManualRegisteredChange={handleManualPancakeRegisteredChange} onStatusChange={handlePancakeStatus} onCustomerChange={handlePancakeCustomer} /><TicketTransfer ticketId={current.id} ticketCode={current.code} onTransferred={async (advisorName) => { ++refreshGeneration.current; discardedOperationDrafts.current.add(current.id); setCurrent(null); setMessage(`${current.code} fue transferido a ${advisorName}.`); await refresh(); }} /></div><span className="current-client-dni">DNI {current.dni}</span></div>
                   {pancakeCustomer?.ticketId === current.id && pancakeCustomer.customer && <PancakeCustomerDetails customer={pancakeCustomer.customer} checkedAt={pancakeCustomer.checkedAt} />}
                   {current.isPreferential && <span className="preferential-badge">Preferencial</span>}
-                  <p>{current.service.name}</p>
-                  <p>
-                    Llegó:{" "}
-                    {new Date(current.arrivedAt).toLocaleTimeString("es-PE", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}{" "}
-                    · Espera: <ElapsedClock since={current.arrivedAt} until={current.startedAt} />
-                    {current.startedAt && <> · Atención: <ElapsedClock since={current.startedAt} /></>}
-                  </p>
-                  <TicketTransfer ticketId={current.id} ticketCode={current.code} onTransferred={async (advisorName) => { ++refreshGeneration.current; setCurrent(null); setMessage(`${current.code} fue transferido a ${advisorName}.`); await refresh(); }} />
+                  <div className="current-service-flow">
                   {isConsultation ? (
                     <div className="ops consultation-actions">
                       <div className="panel-title">
@@ -1690,7 +1781,7 @@ export default function Home() {
                               ...rows,
                               {
                                 serviceName: isDebt ? "Pago de deuda" : "Efectivización",
-                                bankId: isDebt ? availableBanks[0]?.id || null : null,
+                                bankId: null,
                                 amount: "",
                                 commissionPlan: availableBanks[0]?.name === "Interbank" ? "INTERBANK_1_5" : "ATK_1",
                                 settlementTiming: "NEXT_BUSINESS_DAY",
@@ -1718,22 +1809,31 @@ export default function Home() {
                           banks={data.banks}
                           index={index}
                           onChange={patch => setOperations(rows => rows.map((row, i) => i === index ? { ...row, ...patch } : row))}
+                          showQuote={false}
                         /> : <>
-                          <BankSelect banks={rowBanks} value={op.bankId} placeholder="Selecciona banco" onChange={bankId => setOperations(rows => rows.map((row, i) => i === index ? { ...row, bankId } : row))} />
+                          <DebtCardPicker
+                            customer={pancakeCustomer?.ticketId === current.id ? pancakeCustomer.customer : null}
+                            banks={rowBanks}
+                            selectedKey={op.cardKey}
+                            selectedBankId={op.bankId}
+                            onSelect={card => setOperations(rows => rows.map((row, i) => i === index ? { ...row, bankId: card.bankId, cardKey: card.key } : row))}
+                            onSelectBank={bankId => setOperations(rows => rows.map((row, i) => i === index ? { ...row, bankId, cardKey: undefined } : row))}
+                          />
                           <select value={op.debtRate} onChange={event => setOperations(rows => rows.map((row, i) => i === index ? { ...row, debtRate: event.target.value } : row))}>
                             {[1, 1.5, 2, 2.5].map(rate => <option value={rate} key={rate}>{rate}% comisión · mín. S/ {MIN_DEBT_COMMISSION}</option>)}
                           </select>
                           <input type="number" min="0" step="0.01" placeholder="Monto S/" value={op.amount} onChange={event => setOperations(rows => rows.map((row, i) => i === index ? { ...row, amount: event.target.value } : row))} />
                         </>}
                         <button type="button" className="danger small" onClick={() => setOperations(rows => rows.filter((_, i) => i !== index))}>Quitar</button>
-                        {!rowIsEfectivizacion && Number(op.amount) > 0 && <p className="operation-preview">Comisión: <b>{money(debtCommission(Number(op.amount), Number(op.debtRate)))}</b> · Volumen neto: <b>{money(Math.max(0, Number(op.amount) - debtCommission(Number(op.amount), Number(op.debtRate))))}</b> · Utilidad: <b>{money(debtCommission(Number(op.amount), Number(op.debtRate)))}</b></p>}
+                        {!rowIsEfectivizacion && Number(op.amount) > 0 && <p className="operation-preview">Comisión / utilidad: <b>{money(debtCommission(Number(op.amount), Number(op.debtRate)))}</b> · Neto: <b>{money(Math.max(0, Number(op.amount) - debtCommission(Number(op.amount), Number(op.debtRate))))}</b></p>}
                       </div>;
                     })}
                     {effectivizationTotals.gross > 0 && <p className="operation-preview effectivization-total">
-                      Total Efectivización · Comisión: <b>{money(effectivizationTotals.commission)}</b> · Volumen neto: <b>{money(effectivizationTotals.gross - effectivizationTotals.commission)}</b> · Utilidad: <b>{money(effectivizationTotals.commission)}</b>
+                      Total Efectivización · Comisión: <b>{money(effectivizationTotals.commission)}</b> · Neto: <b>{money(effectivizationTotals.gross - effectivizationTotals.commission)}</b>
                     </p>}
                   </div>
                   )}
+                  </div>
                   <div className="current-actions">
                     <button onClick={() => finish("COMPLETED")} disabled={loading}>
                       Finalizar exitoso
@@ -3004,6 +3104,33 @@ function BankBrand({ name }: { name: string }) {
   return <span className={`bank-brand bank-brand-${brand}`} role="img" aria-label={name} title={name}>
     <img className={`bank-logo-image bank-logo-image-${brand}`} src={appAsset(`/banks/${brand}.png`)} alt="" />
   </span>;
+}
+function DebtCardPicker({ customer, banks, selectedKey, selectedBankId, onSelect, onSelectBank }: {
+  customer: PancakeDniCustomer | null;
+  banks: { id: number; name: string }[];
+  selectedKey?: string;
+  selectedBankId: number | null;
+  onSelect: (card: ReturnType<typeof getRegisteredCards>[number]) => void;
+  onSelectBank: (bankId: number | null) => void;
+}) {
+  const allowedBanks = new Set(["BCP", "BBVA", "BanBif", "Scotiabank", "Interbank"]);
+  const cards = getRegisteredCards(customer, banks).filter(card => allowedBanks.has(card.bankName) && card.bankId !== null);
+  if (!cards.length) return <BankSelect banks={banks} value={selectedBankId} placeholder="Selecciona banco" onChange={onSelectBank} />;
+  return <div className="debt-card-picker">
+    <span className="debt-card-picker-label">Tarjeta del cliente</span>
+    <div className="registered-card-options debt-registered-card-options">
+      {cards.map((card, index) => <button
+        type="button"
+        key={`${card.key}:${index}`}
+        className={`registered-card-choice${selectedKey === card.key ? " is-selected" : ""}`}
+        aria-pressed={selectedKey === card.key}
+        onClick={() => onSelect(card)}
+      >
+        <BankLogo bankKey={card.bankKey} name={card.bankName} />
+        <span>{card.lastFour ? `•••• ${card.lastFour}` : card.bankName}</span>
+      </button>)}
+    </div>
+  </div>;
 }
 function BankSelect({ banks, value, defaultValue, onChange, name, placeholder = "Selecciona banco", ariaLabel = "Banco" }: {
   banks: { id: number; name: string }[];

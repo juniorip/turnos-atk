@@ -3,7 +3,7 @@ import { errorResponse, requireUser } from "@/lib/auth";
 import { presenceCutoff } from "@/lib/presence";
 import { prisma } from "@/lib/prisma";
 
-const MAX_ACTIVE_TICKETS = 2;
+const MAX_ACTIVE_TICKETS = 5;
 
 export async function POST(
   _request: Request,

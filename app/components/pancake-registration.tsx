@@ -4,15 +4,19 @@ import { useEffect, useState } from "react";
 import { appFetch } from "@/lib/app-fetch";
 import type { PancakeDniCustomer } from "@/lib/pancake";
 
-export type PancakeRegistrationStatus = "loading" | "registered" | "not-found" | "unavailable";
+export type PancakeRegistrationStatus = "loading" | "registered" | "registered-manual" | "not-found" | "incomplete" | "unavailable";
 
-export default function PancakeRegistration({ ticketId, onStatusChange, onCustomerChange }: { ticketId: number; onStatusChange?: (ticketId: number, status: PancakeRegistrationStatus) => void; onCustomerChange?: (ticketId: number, customer: PancakeDniCustomer | null, checkedAt: string | null) => void }) {
+export default function PancakeRegistration({ ticketId, manualRegistered = false, statusOverride, onManualRegisteredChange, onStatusChange, onCustomerChange }: { ticketId: number; manualRegistered?: boolean; statusOverride?: PancakeRegistrationStatus; onManualRegisteredChange?: (ticketId: number, registered: boolean) => void; onStatusChange?: (ticketId: number, status: PancakeRegistrationStatus) => void; onCustomerChange?: (ticketId: number, customer: PancakeDniCustomer | null, checkedAt: string | null) => void }) {
   const [status, setStatus] = useState<PancakeRegistrationStatus>("loading");
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
+    if (manualRegistered) {
+      setStatus("registered-manual");
+      onStatusChange?.(ticketId, "registered-manual");
+      return;
+    }
     let disposed = false;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 65000);
     const updateStatus = (next: PancakeRegistrationStatus) => {
       setStatus(next);
       onStatusChange?.(ticketId, next);
@@ -20,37 +24,40 @@ export default function PancakeRegistration({ ticketId, onStatusChange, onCustom
     updateStatus("loading");
     void (async () => {
       try {
-        let refresh = attempt > 0;
-        while (!disposed) {
-          const response = await appFetch(`/api/tickets/${ticketId}/pancake-customer${refresh ? "?refresh=1" : ""}`, { cache: "no-store", signal: controller.signal });
-          refresh = false;
-          const payload = await response.json();
-          if (!response.ok) throw new Error("Lookup failed");
-          if (payload.state === "pending") {
-            await new Promise(resolve => setTimeout(resolve, 1500));
-            continue;
-          }
-          const result = payload.result;
-          if (!result?.ok || typeof result.found !== "boolean") throw new Error("Lookup failed");
-          if (!disposed) {
-            updateStatus(result.found ? "registered" : "not-found");
-            onCustomerChange?.(ticketId, result.customer, payload.checkedAt);
-          }
-          break;
-        }
+        const response = await appFetch(`/api/tickets/${ticketId}/pancake-customer${attempt > 0 ? "?refresh=1" : ""}`, { cache: "no-store", signal: controller.signal });
+        const payload = await response.json();
+        if (!response.ok) throw new Error("Lookup failed");
+        // Pending results are refreshed in one batched request every minute by the active-ticket scheduler.
+        if (payload.state === "pending") return;
+        const result = payload.result;
+        if (!result?.ok || typeof result.found !== "boolean") throw new Error("Lookup failed");
+        if (disposed) return;
+        const nextStatus = result.found ? "registered" : result.complete ? "not-found" : "incomplete";
+        updateStatus(nextStatus);
+        onCustomerChange?.(ticketId, result.customer, payload.checkedAt);
       } catch {
-        if (!disposed) updateStatus("unavailable");
-      } finally { clearTimeout(timeout); }
+        if (disposed || controller.signal.aborted) return;
+        updateStatus("unavailable");
+      }
     })();
-    return () => { disposed = true; clearTimeout(timeout); controller.abort(); };
-  }, [ticketId, attempt, onStatusChange, onCustomerChange]);
+    return () => { disposed = true; controller.abort(); };
+  }, [ticketId, attempt, manualRegistered, onManualRegisteredChange, onStatusChange, onCustomerChange]);
 
-  const label = { loading: "Consultando Pancake…", registered: "Registrado", "not-found": "Posiblemente no registrado", unavailable: "No se pudo comprobar" }[status];
-  const detail = status === "not-found" ? "No se encontró el DNI en las conversaciones revisadas de Pancake. Puede existir un registro anterior o sin el DNI en el alias." : status === "unavailable" ? "La consulta falló. Esto no significa que el cliente no esté registrado." : label;
+  const visibleStatus = statusOverride ?? status;
+  const label = { loading: "Consultando Pancake…", registered: "Registrado en Pancake", "registered-manual": "Registrado · confirmado manualmente", "not-found": "No se encontró en Pancake", incomplete: "Búsqueda incompleta", unavailable: "No se pudo comprobar" }[visibleStatus];
+  const detail = visibleStatus === "not-found" ? "Se revisaron las conversaciones disponibles. Turnos volverá a buscar automáticamente cada minuto mientras este ticket siga activo." : visibleStatus === "incomplete" ? "La búsqueda no alcanzó todas las conversaciones. Turnos volverá a consultar automáticamente cada minuto mientras este ticket siga activo." : visibleStatus === "registered-manual" ? "Marcado manualmente como registrado. Esta confirmación no envía un registro nuevo a Registros ATK." : visibleStatus === "unavailable" ? "La consulta falló. Turnos volverá a intentar automáticamente cada minuto mientras este ticket siga activo." : label;
+  const canConfirmManually = visibleStatus === "not-found" || visibleStatus === "incomplete" || visibleStatus === "unavailable" || visibleStatus === "registered-manual";
   return <span className="pancake-registration">
-    <span className={`pancake-registration-badge is-${status}`} role="status" aria-live="polite" title={detail}>
-      <span aria-hidden="true">{status === "registered" ? "✓" : status === "not-found" ? "✕" : status === "loading" ? "◌" : "—"}</span> {label}
+    <span className={"pancake-registration-badge is-" + visibleStatus} role="status" aria-live="polite" title={detail}>
+      <span aria-hidden="true">{visibleStatus === "registered" || visibleStatus === "registered-manual" ? "✓" : visibleStatus === "not-found" ? "✕" : visibleStatus === "loading" ? "◌" : "—"}</span> {label}
     </span>
-    <button type="button" disabled={status === "loading"} onClick={() => setAttempt(value => value + 1)} aria-label="Volver a consultar en Pancake" title="Volver a consultar en Pancake">↻</button>
+    {canConfirmManually && <label className="pancake-manual-confirm" title="Marca esto solo si verificaste que el cliente ya está registrado.">
+      <input type="checkbox" checked={visibleStatus === "registered-manual"} onChange={(event) => {
+        if (event.target.checked) onManualRegisteredChange?.(ticketId, true);
+        else { onManualRegisteredChange?.(ticketId, false); setAttempt(value => value + 1); }
+      }} />
+      <span>Ya está registrado</span>
+    </label>}
+    <button type="button" disabled={visibleStatus === "loading"} onClick={() => { if (manualRegistered) onManualRegisteredChange?.(ticketId, false); setAttempt(value => value + 1); }} aria-label="Volver a consultar en Pancake" title="Volver a consultar en Pancake">↻</button>
   </span>;
 }

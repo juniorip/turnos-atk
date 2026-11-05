@@ -19,7 +19,7 @@ export function getRegisteredCards(customer: PancakeDniCustomer | null, banks: {
   return getNoteBankOptions(notes).flatMap<RegisteredCard>(bank => {
     const bankId = banks.find(candidate => candidate.name === databaseBankNames[bank.id])?.id || null;
     const matches = cards.filter(card => card.bankId === bank.id);
-    return matches.length ? matches.map(card => ({ key: `${bank.id}:${card.lastFour}`, bankKey: bank.id, bankName: bank.name, bankId, lastFour: card.lastFour })) : [{ key: `${bank.id}:bank`, bankKey: bank.id, bankName: bank.name, bankId }];
+    return matches.map(card => ({ key: `${bank.id}:${card.lastFour}`, bankKey: bank.id, bankName: bank.name, bankId, lastFour: card.lastFour }));
   });
 }
 export function profileCommissionPlan(profile: CustomerProfile, bankName: string): CommissionPlan {

@@ -5,7 +5,7 @@ import { sortTicketsForCall } from "@/lib/queue-order";
 import { presenceCutoff } from "@/lib/presence";
 
 const activeStatuses = [TicketStatus.CALLED, TicketStatus.IN_SERVICE];
-const MAX_ACTIVE_TICKETS = 2;
+const MAX_ACTIVE_TICKETS = 5;
 
 export async function POST(request: Request) {
   try {

@@ -106,7 +106,15 @@
         const chunks = line.split('/');
         for (const [chunkIndex, chunk] of chunks.entries()) {
           const matches = bankMatches(chunk);
-          const suffixes = numberRuns(chunk).filter(candidate => /^\d{4}$/.test(candidate.raw.trim()));
+          const suffixes = numberRuns(chunk).flatMap(candidate => {
+            const cardPair = candidate.raw.trim().match(/^(\d{4})\s*-\s*(\d{4})$/);
+            if (cardPair) {
+              const firstIndex = candidate.index + candidate.raw.indexOf(cardPair[1]);
+              const secondIndex = candidate.index + candidate.raw.lastIndexOf(cardPair[2]);
+              return [{ ...candidate, raw: cardPair[1], index: firstIndex }, { ...candidate, raw: cardPair[2], index: secondIndex }];
+            }
+            return /^\d{4}$/.test(candidate.raw.trim()) ? [candidate] : [];
+          });
           if (matches.length) {
             for (const digits of pending) add(matches[0].bank, digits);
             pending = [];
@@ -166,6 +174,9 @@
             const label = lastIdentifierLabel(before);
             if (label) currentLabel = label;
             previousEnd = candidate.index + candidate.raw.length;
+            // Notes may write a card as two four-digit groups (e.g. "0050 - 5267").
+            // Do not merge that card fragment into an eight-digit bank account.
+            if (/^\s*\d{4}\s*-\s*\d{4}\s*$/.test(candidate.raw)) continue;
             const digits = candidate.raw.replace(/\D/g, '');
             if (digits.length < 8 || digits.length > 22) continue;
             if (/\b(?:DNI|RUC|CELULAR|CEL|TELEFONO|TEL|WHATSAPP|WSP|DIRECCION)\b/i.test(normalize(before))) continue;
@@ -188,9 +199,10 @@
         }
         if (matches.length) {
           const prefix = line.slice(0, matches[0].index);
-          // A number before a new bank name may belong to an earlier account.
-          // Keep it unassigned rather than guessing which bank it belongs to.
-          if (/\d/.test(prefix)) { currentBank = null; currentLabel = ''; consume(prefix, false, true); }
+          // Pancake notes often put the account number before the bank name
+          // (for example, "19192665321032 BCP"). In that format the bank
+          // immediately following the number identifies the account.
+          if (/\d/.test(prefix)) { currentBank = matches[0].bank; currentLabel = lastIdentifierLabel(prefix); consume(prefix, true); }
           for (let index = 0; index < matches.length; index++) {
             const match = matches[index];
             currentBank = match.bank;

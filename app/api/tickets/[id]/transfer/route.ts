@@ -7,7 +7,7 @@ import { ensureLargeRoomSchema } from "@/lib/large-room-schema";
 
 const schema = z.object({ recipientId: z.union([z.number().int().positive(), z.literal("LARGE_ROOM")]) });
 const activeStatuses = [TicketStatus.CALLED, TicketStatus.IN_SERVICE];
-const MAX_ACTIVE_TICKETS = 2;
+const MAX_ACTIVE_TICKETS = 5;
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -98,14 +98,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         where: {
           id: body.data.recipientId, branchId: ticket.branchId, role: { in: [UserRole.WORKER, UserRole.MANAGER] },
           moduleNumber: { not: null }, active: true, availability: WorkerAvailability.AVAILABLE, lastActiveAt: { gte: presenceCutoff() },
-          assigned: { none: { status: { in: activeStatuses } } },
         }, select: { id: true, name: true, moduleNumber: true, multipleAttentionEnabled: true },
       });
       if (!recipient) return { error: "Ese asesor ya no está disponible para recibir este trámite.", status: 409 } as const;
       if (recipient.id === ticket.assignedToId) return { error: "El ticket ya está asignado a ese asesor.", status: 409 } as const;
       const recipientActiveCount = await tx.ticket.count({ where: { assignedToId: recipient.id, status: { in: activeStatuses } } });
       if (recipientActiveCount > 0 && (!recipient.multipleAttentionEnabled || recipientActiveCount >= MAX_ACTIVE_TICKETS)) {
-        return { error: recipient.multipleAttentionEnabled ? "Ese asesor ya alcanzó el máximo de 2 tickets activos." : "Ese asesor ya tiene un cliente. Debe activar Atención múltiple para recibir otro ticket." , status: 409 } as const;
+        return { error: recipient.multipleAttentionEnabled ? `Ese asesor ya alcanzó el máximo de ${MAX_ACTIVE_TICKETS} tickets activos.` : "Ese asesor ya tiene un cliente. Debe activar Atención múltiple para recibir otro ticket." , status: 409 } as const;
       }
       const changed = await tx.ticket.updateMany({
         where: { id, ...(isManager || isAdmin ? {} : { assignedToId: user.id }), branchId: ticket.branchId, status: ticket.status },

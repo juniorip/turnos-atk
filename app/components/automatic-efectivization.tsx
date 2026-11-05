@@ -8,7 +8,7 @@ import { calculateDeposit, parseAmountCents } from "../../public/buscar-cliente-
 import BankLogo from "./bank-logo";
 
 export type AutomaticOperationFields = { bankId: number | null; amount: string; commissionPlan: CommissionPlan; settlementTiming: SettlementTiming; commercialChannel?: "POS" | "PAYMENT_LINK" | null; cardKey?: string; customerProfile?: CustomerProfile; profileDetected?: boolean };
-export default function AutomaticEfectivization({ operation, customer, banks, index, onChange }: { operation: AutomaticOperationFields; customer: PancakeDniCustomer | null; banks: { id: number; name: string }[]; index: number; onChange: (patch: Partial<AutomaticOperationFields>) => void }) {
+export default function AutomaticEfectivization({ operation, customer, banks, index, onChange, showQuote = true }: { operation: AutomaticOperationFields; customer: PancakeDniCustomer | null; banks: { id: number; name: string }[]; index: number; onChange: (patch: Partial<AutomaticOperationFields>) => void; showQuote?: boolean }) {
   const cards = useMemo(() => getRegisteredCards(customer, banks), [customer, banks]);
   const selected = cards.find(card => card.key === operation.cardKey);
   const detected = customerProfile(customer);
@@ -16,11 +16,14 @@ export default function AutomaticEfectivization({ operation, customer, banks, in
   const optionsKey = cards.map(card => `${card.key}:${card.bankId}`).join("|");
   useEffect(() => {
     if (detected && (operation.customerProfile !== detected || !operation.profileDetected)) onChange({ customerProfile: detected, profileDetected: true });
-    else if (!detected && operation.profileDetected) onChange({ customerProfile: undefined, profileDetected: false });
-  }, [detected, operation.customerProfile, operation.profileDetected, onChange]);
+    else if (customer && !detected && operation.profileDetected) onChange({ customerProfile: undefined, profileDetected: false });
+  }, [customer, detected, operation.customerProfile, operation.profileDetected, onChange]);
   useEffect(() => {
-    if (operation.cardKey && (!selected || selected.bankId !== operation.bankId)) onChange({ cardKey: undefined, bankId: null });
-  }, [optionsKey, operation.cardKey, operation.bankId, selected, onChange]);
+    // The customer record can be temporarily absent while switching between
+    // active tickets. Keep the saved bank/card until this ticket's Pancake data
+    // is available again, otherwise its draft loses the selection and quote.
+    if (customer && operation.cardKey && (!selected || selected.bankId !== operation.bankId)) onChange({ cardKey: undefined, bankId: null });
+  }, [customer, optionsKey, operation.cardKey, operation.bankId, selected, onChange]);
   useEffect(() => {
     if (!profile || !selected?.bankId) return;
     const name = banks.find(bank => bank.id === selected.bankId)?.name || "";
@@ -42,6 +45,6 @@ export default function AutomaticEfectivization({ operation, customer, banks, in
     {selected && ["sip", "cencosud", "ripley", "diners"].includes(selected.bankKey) && <label>Canal<select value={operation.commercialChannel || "POS"} onChange={event => onChange({ commercialChannel: event.target.value as "POS" | "PAYMENT_LINK" })}><option value="POS">POS</option><option value="PAYMENT_LINK">Link de pago</option></select></label>}
     {delayed && <label>Plazo del depósito<select aria-label={`Plazo del depósito ${index + 1}`} value={operation.settlementTiming} onChange={event => onChange({ settlementTiming: event.target.value as SettlementTiming })}><option value="NEXT_BUSINESS_DAY">Siguiente día hábil</option><option value="SAME_DAY">Mismo día</option></select></label>}
     <label>Monto de la efectivización (S/)<input aria-label={`Monto de efectivización ${index + 1}`} placeholder="Monto S/" type="text" inputMode="decimal" value={operation.amount} onChange={event => onChange({ amount: event.target.value })} /></label>
-    {quote?.ok ? <div className="automatic-deposit" aria-live="polite"><p>Tarifa aplicada: <b>{quote.flatCents !== undefined ? "S/ 30.00 fijos" : `${(quote.rateBps || 0) / 100}%`}</b>{quote.minimumApplied ? ` · Mínimo ${money(quote.minimumCents)}` : ""}</p><p>Comisión: <b>{money(quote.commissionCents)}</b></p><p className="automatic-deposit-net">Se deposita: <strong>{money(quote.depositCents)}</strong></p></div> : operation.amount && <p className="automatic-quote-error" role="status">{!selected ? "Selecciona una tarjeta o banco registrado." : !profile ? "Confirma el porcentaje del cliente." : !amountCents ? "Ingresa un monto válido, con hasta dos decimales." : "El monto debe ser mayor que la comisión mínima."}</p>}
+    {quote?.ok ? showQuote && <div className="automatic-deposit" aria-live="polite"><p>Tarifa aplicada: <b>{quote.flatCents !== undefined ? "S/ 30.00 fijos" : `${(quote.rateBps || 0) / 100}%`}</b>{quote.minimumApplied ? ` · Mínimo ${money(quote.minimumCents)}` : ""}</p><p>Comisión: <b>{money(quote.commissionCents)}</b></p><p className="automatic-deposit-net">Se deposita: <strong>{money(quote.depositCents)}</strong></p></div> : operation.amount && <p className="automatic-quote-error" role="status">{!selected ? "Selecciona una tarjeta o banco registrado." : !profile ? "Confirma el porcentaje del cliente." : !amountCents ? "Ingresa un monto válido, con hasta dos decimales." : "El monto debe ser mayor que la comisión mínima."}</p>}
   </section>;
 }

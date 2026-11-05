@@ -5,24 +5,41 @@
 .operation-row > * { min-width: 0; }
 .fixed-commission { display: flex; align-items: center; padding: 9px; border: 1px solid rgba(47, 191, 113, .35); border-radius: var(--radius-sm); background: var(--ok-soft); color: #bdeed2; font-size: .82rem; font-weight: 700; white-space: nowrap; }
 .current-client-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; margin: 8px 0 5px; }
+.current-attention-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0 0 8px; }
+.current-attention-meta > span:last-child { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; }
 .current-client-heading h2 { flex: 1 1 280px; min-width: 0; margin: 0; font-size: clamp(1.08rem, 1.5vw, 1.35rem); line-height: 1.25; overflow-wrap: anywhere; }
 .current-client-dni { flex: 0 0 auto; color: #9cc5ff; font-size: 1.08rem; font-weight: 800; font-variant-numeric: tabular-nums; }
 .current-client-title { display: flex; flex: 1 1 360px; min-width: 0; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .current-client-title h2 { flex: 0 1 auto; }
+.current-client-title .ticket-transfer { flex: 0 0 auto; margin: 0; }
+.current-client-title .ticket-transfer-toggle { min-height: 32px; }
+.current-service-flow { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.current-service-flow > .ops:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
 .pancake-registration { display: inline-flex; max-width: 100%; align-items: center; gap: 5px; }
 .pancake-registration-badge { display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px; border: 1px solid #4b5c70; border-radius: 8px; color: #c5d3e3; font-size: .78rem; font-weight: 700; line-height: 1.35; }
 .pancake-registration-badge.is-registered { color: #9debc6; border-color: #277957; background: #123d2f; }
 .pancake-registration-badge.is-not-found { color: #ffbdbd; border-color: #9c4c55; background: #431e29; }
+.pancake-registration-badge.is-incomplete { color: #ffe0a3; border-color: #846b3d; background: #382f1c; }
+.pancake-registration-badge.is-registered-manual { color: #b8ddff; border-color: #3c78a8; background: #173653; }
 .pancake-registration button { flex: 0 0 auto; width: 28px; min-height: 28px; margin: 0; padding: 2px; border: 1px solid #42566f; border-radius: 7px; background: #15263b; color: #c5d3e3; font-size: 1rem; line-height: 1; }
 .pancake-registration button:disabled { opacity: .5; cursor: wait; }
-.pancake-customer-details { margin: 16px 0; padding: 16px; border: 1px solid #2e4c69; border-radius: 12px; background: #0b1c2d; min-width: 0; text-align: left; }
-.pancake-customer-details h3, .pancake-customer-details h4 { margin: 0 0 12px; }
+.pancake-manual-confirm { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border: 1px solid #3c78a8; border-radius: 8px; background: rgba(23, 54, 83, .55); color: #b8ddff; font-size: .72rem; font-weight: 700; cursor: pointer; }
+.pancake-manual-confirm input { width: 14px; height: 14px; margin: 0; accent-color: #4d9fff; }
+.pancake-customer-details { margin: 16px 0; padding: 0; overflow: hidden; border: 1px solid #2e4c69; border-radius: 12px; background: #0b1c2d; min-width: 0; text-align: left; }
+.pancake-customer-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; color: #e7f1ff; cursor: pointer; font-weight: 750; list-style: none; }
+.pancake-customer-summary::-webkit-details-marker { display: none; }
+.pancake-customer-chevron { display: grid; width: 26px; height: 26px; flex: 0 0 26px; place-items: center; border: 1px solid #365472; border-radius: 7px; color: #9dcbff; transition: transform .18s ease, background .18s ease; }
+.pancake-customer-chevron svg { display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.pancake-customer-details[open] > .pancake-customer-summary .pancake-customer-chevron { transform: rotate(180deg); background: rgba(77, 159, 255, .1); }
+.pancake-customer-summary:hover .pancake-customer-chevron { background: rgba(77, 159, 255, .14); }
+.pancake-customer-content { padding: 0 16px 16px; }
+.pancake-customer-content h4 { margin: 12px 0; }
 .pancake-customer-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 12px; margin: 0 0 18px; }
 .pancake-customer-fields dt { font-size: .75rem; color: #a5bcd4; }
 .pancake-customer-fields dd { margin: 3px 0 0; font-weight: 650; overflow-wrap: anywhere; }
 .pancake-customer-bank { padding: 10px 0; border-top: 1px solid #29415a; }
 .pancake-customer-bank p { margin: 4px 0; overflow-wrap: anywhere; }
-.pancake-customer-details summary { margin: 12px 0; cursor: pointer; color: #9dcbff; }
+.pancake-customer-content > details > summary { margin: 12px 0; cursor: pointer; color: #9dcbff; }
 .pancake-customer-note { white-space: pre-wrap; overflow-wrap: anywhere; }
 .pancake-customer-details small { display: block; margin-top: 12px; color: #a5bcd4; }
 .automatic-efectivization { grid-column: 1 / -1; min-width: 0; padding: 16px; background: #0b1c2d; border: 1px solid #315675; border-radius: 12px; }
@@ -33,6 +50,10 @@
 .registered-card-choice { display: flex; min-width: 0; min-height: 92px; flex-direction: column; align-items: center; justify-content: center; gap: 9px; padding: 12px; border: 1px solid #3c5671; border-radius: 10px; background: #10283e; color: #e4efff; cursor: pointer; }
 .registered-card-choice.is-selected { border: 2px solid #58aaff; background: #163c61; }
 .registered-card-choice span { font-size: .84rem; }
+.debt-card-picker { grid-column: 1 / -1; min-width: 0; }
+.debt-card-picker-label { display: block; margin: 2px 0 7px; color: var(--muted); font-size: .78rem; }
+.debt-registered-card-options { grid-template-columns: repeat(auto-fit, minmax(min(100%, 105px), 1fr)); margin: 0; }
+.debt-registered-card-options .registered-card-choice { min-height: 64px; gap: 5px; padding: 7px; }
 .registered-bank-logo { width: 100px; max-width: 100%; height: 38px; padding: 5px 7px; border-radius: 5px; background: #fff; object-fit: contain; }
 .registered-bank-wordmark { display: inline-flex; align-items: center; justify-content: center; min-width: 80px; min-height: 32px; padding: 4px 9px; border-radius: 5px; background: #eee; color: #153a63; font-size: 1.05rem !important; font-weight: 800; }
 .registered-bank-wordmark.logo-cmr { background: #00883f; color: #fff; }
@@ -42,7 +63,8 @@
 .automatic-efectivization input, .automatic-efectivization select { width: 100%; min-width: 0; }
 .automatic-deposit { margin-top: 14px; padding: 12px; border: 1px solid #28694f; border-radius: 9px; background: #102e27; }
 .automatic-deposit p { margin: 4px 0; }
-.automatic-deposit-net strong { display: block; color: #9aefd0; font-size: 1.45rem; }
+.automatic-deposit b, .automatic-deposit-net strong { color: var(--ok); }
+.automatic-deposit-net strong { display: block; font-size: 1.45rem; }
 .automatic-quote-error { color: #ffbdbd; }
 .operation-panel-title { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; gap: 12px; }
 .operation-panel-title > div { min-width: 0; }
@@ -795,7 +817,7 @@ tbody tr:hover { background: rgba(37, 131, 233, .08); }
 }
 
 /* Keep each work page focused: queue/current, branch tracking, personal history. */
-.queue-workspace { grid-template-columns: minmax(0, 1.3fr) minmax(320px, .9fr); align-items: start; }
+.queue-workspace { grid-template-columns: minmax(300px, .8fr) minmax(460px, 1.2fr); align-items: start; }
 .lince-manager-workspace { grid-template-columns: minmax(0, 1.3fr) minmax(320px, .9fr); grid-template-areas: "queue current"; align-items: start; }
 .lince-manager-workspace > .queue { grid-area: queue; }
 .lince-manager-workspace > .current { grid-area: current; }
