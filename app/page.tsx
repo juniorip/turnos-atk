@@ -3,6 +3,12 @@ import { ChangeEvent, FormEvent, PointerEvent as ReactPointerEvent, useCallback,
 import { debtCommission, effectivizacionCommission, MIN_DEBT_COMMISSION } from "@/lib/effectivizacion";
 import { LIMA_DISTRICTS } from "@/lib/lima-districts";
 import { appAsset, appFetch } from "@/lib/app-fetch";
+import PancakeRegistration, { type PancakeRegistrationStatus } from "./components/pancake-registration";
+import PancakeCustomerDetails from "./components/pancake-customer-details";
+import type { PancakeDniCustomer } from "@/lib/pancake";
+import AutomaticEfectivization from "./components/automatic-efectivization";
+import { customerProfile, getRegisteredCards, profileCommissionPlan, type CustomerProfile } from "@/lib/registered-cards";
+import { parseAmountCents } from "../public/buscar-cliente-utils.js";
 type PreviewWorker = { id: number; name: string; role: string; moduleNumber: number | null; branch?: { name: string } | null };
 type BranchComparisonData = {
   branches: { branchId: number; branchName: string; received: number; completed: number; failed: number; cancelled: number; operations: number; volume: number; netVolume: number; profit: number }[];
@@ -106,6 +112,9 @@ type Ticket = {
 };
 type TransferAdvisor = { id: number; name: string; moduleNumber: number | null; activeCount: number; acceptsMultiple: boolean };
 type OperationDraft = {
+  cardKey?: string;
+  customerProfile?: CustomerProfile;
+  profileDetected?: boolean;
   serviceName: "Efectivización" | "Pago de deuda";
   bankId: number | null;
   amount: string;
@@ -368,6 +377,17 @@ export default function Home() {
     [section, setSection] = useState("summary"),
     [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedClaimId, setSelectedClaimId] = useState<number | null>(null);
+  const [pancakeRegistration, setPancakeRegistration] = useState<{ ticketId: number; status: PancakeRegistrationStatus } | null>(null);
+  const [pancakeCustomer, setPancakeCustomer] = useState<{ ticketId: number; customer: PancakeDniCustomer | null; checkedAt: string | null } | null>(null);
+  const handlePancakeCustomer = useCallback((ticketId: number, customer: PancakeDniCustomer | null, checkedAt: string | null) => {
+    if (ticketId === current?.id) setPancakeCustomer({ ticketId, customer, checkedAt });
+  }, [current?.id]);
+  const handlePancakeStatus = useCallback((ticketId: number, status: PancakeRegistrationStatus) => {
+    if (ticketId !== current?.id) return;
+    setPancakeRegistration({ ticketId, status });
+    if (status === "registered") setRegistrationRequested(false);
+  }, [current?.id]);
+  const canRegisterCurrentClient = pancakeRegistration?.ticketId === current?.id && pancakeRegistration?.status === "not-found";
   const [roomActionLoading, setRoomActionLoading] = useState(false);
   const [selectedRoomTicketIds, setSelectedRoomTicketIds] = useState<number[]>([]);
   const [roomAssignLoading, setRoomAssignLoading] = useState(false);
@@ -982,12 +1002,30 @@ export default function Home() {
     const cancelled = outcome === "CANCELLED";
     if (cancelled && !confirm("¿Confirmas que el cliente se retiró durante la atención? El ticket quedará cancelado y las operaciones aún no guardadas se descartarán.")) return;
     if (!successful && !cancelled && operations.some(operation => Number(operation.amount) > 0) && !confirm("Marcar fallido descartará las operaciones ingresadas. Si hubo una operación válida, finaliza como exitoso. ¿Descartar operaciones y marcar fallido?")) return;
+    let preparedOperations: (Omit<OperationDraft, "amount"> & { amount: number })[] = [];
+    if (successful) {
+      try {
+        const customer = pancakeCustomer?.ticketId === current.id ? pancakeCustomer.customer : null;
+        const cards = getRegisteredCards(customer, data?.banks || []);
+        preparedOperations = operations.filter(operation => operation.amount.trim() !== "").map(operation => {
+          if (operation.serviceName !== "Efectivización") return { ...operation, amount: Number(operation.amount) };
+          const card = cards.find(candidate => candidate.key === operation.cardKey && candidate.bankId === operation.bankId);
+          const profile = customerProfile(customer) || operation.customerProfile;
+          const cents = parseAmountCents(operation.amount);
+          if (!card?.bankId || !profile || !cents) throw new Error("Selecciona una tarjeta registrada, confirma el porcentaje e ingresa un monto válido.");
+          const bankName = data?.banks.find(bank => bank.id === card.bankId)?.name || "";
+          const commissionPlan = profileCommissionPlan(profile, bankName);
+          effectivizacionCommission(bankName, cents / 100, commissionPlan, operation.settlementTiming);
+          return { ...operation, commissionPlan, amount: cents / 100 };
+        }).filter(operation => operation.amount > 0);
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "Revisa las operaciones antes de finalizar.");
+        return;
+      }
+    }
     setLoading(true);
     setMessage(successful ? "Finalizando atención…" : cancelled ? "Cancelando ticket…" : "Marcando ticket como fallido…");
     try {
-      const validOperations = operations
-        .filter((o) => Number(o.amount) > 0)
-        .map((o) => ({ ...o, amount: Number(o.amount) }));
       const r = await appFetch(`/api/tickets/${current.id}/complete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -995,9 +1033,9 @@ export default function Home() {
           successful,
           cancelled,
           escalation,
-          registerClient: registrationRequested,
+          registerClient: registrationRequested && canRegisterCurrentClient,
           uploadPlatform,
-          operations: (successful ? validOperations : []).map((operation) => ({
+          operations: preparedOperations.map((operation) => ({
             ...operation,
             debtRate: Number(operation.debtRate),
           })),
@@ -1119,11 +1157,15 @@ export default function Home() {
     : data.banks.filter((bank) => ["BCP", "BBVA", "BanBif", "Scotiabank", "Interbank"].includes(bank.name));
   const effectivizationTotals = operations.reduce((totals, operation) => {
     if (operation.serviceName !== "Efectivización") return totals;
-    const amount = Number(operation.amount);
+    const cents = parseAmountCents(operation.amount);
+    if (!cents || !operation.customerProfile) return totals;
+    const amount = cents / 100;
     const bank = data.banks.find((candidate) => candidate.id === operation.bankId);
     if (!bank || !Number.isFinite(amount) || amount <= 0) return totals;
-    const commission = effectivizacionCommission(bank.name, amount, operation.commissionPlan, operation.settlementTiming).profit;
-    return { gross: totals.gross + amount, commission: totals.commission + commission };
+    try {
+      const commission = effectivizacionCommission(bank.name, amount, profileCommissionPlan(operation.customerProfile, bank.name), operation.settlementTiming).profit;
+      return { gross: totals.gross + amount, commission: totals.commission + commission };
+    } catch { return totals; }
   }, { gross: 0, commission: 0 });
   return (
     <main className={`app-shell${isWorker ? " worker-home-shell" : isLeader ? " leader-home-shell" : ""}`}>
@@ -1524,7 +1566,8 @@ export default function Home() {
               {current ? current.status === "CALLED" ? (
                 <div className="called-ticket">
                   <span className="eyebrow">🔔 LLAMADO EN PANTALLA</span>
-                  <div className="current-client-heading"><h2>{current.code} · {current.clientName}</h2><span className="current-client-dni">DNI {current.dni}</span></div>
+                  <div className="current-client-heading"><div className="current-client-title"><h2>{current.code} · {current.clientName}</h2><PancakeRegistration key={current.id} ticketId={current.id} onStatusChange={handlePancakeStatus} onCustomerChange={handlePancakeCustomer} /></div><span className="current-client-dni">DNI {current.dni}</span></div>
+                  {pancakeCustomer?.ticketId === current.id && pancakeCustomer.customer && <PancakeCustomerDetails customer={pancakeCustomer.customer} checkedAt={pancakeCustomer.checkedAt} />}
                   {current.isPreferential && <span className="preferential-badge">Preferencial</span>}
                   <p>{current.service.name}</p>
                   <p className="called-copy">El ticket seguirá apareciendo y sonando en la TV hasta que confirmes que el cliente se acercó.</p>
@@ -1536,7 +1579,8 @@ export default function Home() {
                 </div>
               ) : (
                 <>
-                  <div className="current-client-heading"><h2>{current.code} · {current.clientName}</h2><span className="current-client-dni">DNI {current.dni}</span></div>
+                  <div className="current-client-heading"><div className="current-client-title"><h2>{current.code} · {current.clientName}</h2><PancakeRegistration key={current.id} ticketId={current.id} onStatusChange={handlePancakeStatus} onCustomerChange={handlePancakeCustomer} /></div><span className="current-client-dni">DNI {current.dni}</span></div>
+                  {pancakeCustomer?.ticketId === current.id && pancakeCustomer.customer && <PancakeCustomerDetails customer={pancakeCustomer.customer} checkedAt={pancakeCustomer.checkedAt} />}
                   {current.isPreferential && <span className="preferential-badge">Preferencial</span>}
                   <p>{current.service.name}</p>
                   <p>
@@ -1637,7 +1681,7 @@ export default function Home() {
                         <h3>Operaciones realizadas</h3>
                       </div>
                       <div className="inline-actions operation-actions">
-                        {(isEfectivizacion || isDebt) && <button type="button" className={`registration-state-toggle${registrationRequested ? " is-active" : ""}`} aria-pressed={registrationRequested} onClick={() => setRegistrationRequested((value) => !value)}><span className="registration-state-light" aria-hidden="true" />{registrationRequested ? "Registro activo · se enviará al finalizar" : "Activar registro del cliente"}</button>}
+                        {(isEfectivizacion || isDebt) && canRegisterCurrentClient && <button type="button" className={`registration-state-toggle${registrationRequested ? " is-active" : ""}`} aria-pressed={registrationRequested} onClick={() => setRegistrationRequested((value) => !value)}><span className="registration-state-light" aria-hidden="true" />{registrationRequested ? "Registro activo · se enviará al finalizar" : "Activar registro del cliente"}</button>}
                         <button
                           type="button"
                           className="ghost"
@@ -1646,7 +1690,7 @@ export default function Home() {
                               ...rows,
                               {
                                 serviceName: isDebt ? "Pago de deuda" : "Efectivización",
-                                bankId: availableBanks[0]?.id || null,
+                                bankId: isDebt ? availableBanks[0]?.id || null : null,
                                 amount: "",
                                 commissionPlan: availableBanks[0]?.name === "Interbank" ? "INTERBANK_1_5" : "ATK_1",
                                 settlementTiming: "NEXT_BUSINESS_DAY",
@@ -1662,152 +1706,27 @@ export default function Home() {
                     </div>
                     {operations.map((op, index) => {
                       const rowIsEfectivizacion = op.serviceName === "Efectivización";
-                      const rowIsDebt = op.serviceName === "Pago de deuda";
                       const rowBanks = banksForOperation(op.serviceName);
-                      return <div
-                        className={`operation-row${rowIsEfectivizacion ? " effective-operation" : ""}`}
-                        key={index}
-                      >
-                        <select
-                          aria-label={`Tipo de operación ${index + 1}`}
-                          value={op.serviceName}
-                          onChange={(event) => {
-                            const serviceName = event.target.value as OperationDraft["serviceName"];
-                            setOperations((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, serviceName, bankId: null, commercialChannel: null } : row));
-                          }}
-                        >
-                          <option value="Efectivización">Efectivización</option>
-                          <option value="Pago de deuda">Pago de deuda</option>
-                        </select>
-                        <BankSelect
-                          banks={rowBanks}
-                          value={op.bankId}
-                          placeholder="Selecciona banco"
-                          onChange={(bankId) =>
-                            setOperations((rows) =>
-                              rows.map((x, i) => {
-                                const selectedBank = rowBanks.find((bank) => bank.id === bankId);
-                                return i === index
-                                  ? {
-                                      ...x,
-                                      bankId,
-                                      commercialChannel: selectedBank?.name === "Tarjeta Comercial" ? x.commercialChannel : null,
-                                      commissionPlan: selectedBank?.name === "Interbank"
-                                        ? "INTERBANK_1_5"
-                                        : x.commissionPlan.startsWith("INTERBANK_") ? "ATK_1" : x.commissionPlan,
-                                    }
-                                  : x;
-                              }),
-                            )
-                          }
-                        />
-                        {rowIsEfectivizacion && rowBanks.find((bank) => bank.id === op.bankId)?.name === "Tarjeta Comercial" && (
-                          <>
-                            <select aria-label={`Canal de Tarjeta Comercial ${index + 1}`} value={op.commercialChannel || "POS"} onChange={(event) => setOperations((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, commercialChannel: event.target.value as "POS" | "PAYMENT_LINK" } : row))}>
-                              <option value="POS">POS</option>
-                              <option value="PAYMENT_LINK">Link de pago</option>
-                            </select>
-                            <span className="fixed-commission">8%</span>
-                          </>
-                        )}
-                        {rowIsEfectivizacion && !["CMR", "IO", "Tarjeta Comercial"].includes(rowBanks.find((bank) => bank.id === op.bankId)?.name || "") && (
-                          <select
-                            value={op.commissionPlan}
-                            onChange={(e) =>
-                              setOperations((rows) =>
-                                rows.map((x, i) =>
-                                  i === index
-                                    ? {
-                                        ...x,
-                                        commissionPlan: e.target.value as OperationDraft["commissionPlan"],
-                                      }
-                                    : x,
-                                ),
-                              )
-                            }
-                          >
-                            {commissionPlans.filter((plan) => plan.id.startsWith("INTERBANK_") === (rowBanks.find((bank) => bank.id === op.bankId)?.name === "Interbank")).map((plan) => (
-                              <option value={plan.id} key={plan.id}>
-                                {plan.label}
-                              </option>
-                            ))}
+                      return <div className={"operation-row" + (rowIsEfectivizacion ? " effective-operation" : "")} key={index}>
+                        <select aria-label={"Tipo de operación " + (index + 1)} value={op.serviceName} onChange={event => {
+                          const serviceName = event.target.value as OperationDraft["serviceName"];
+                          setOperations(rows => rows.map((row, i) => i === index ? { ...row, serviceName, bankId: null, commercialChannel: null, cardKey: undefined, customerProfile: undefined, profileDetected: false } : row));
+                        }}><option value="Efectivización">Efectivización</option><option value="Pago de deuda">Pago de deuda</option></select>
+                        {rowIsEfectivizacion ? <AutomaticEfectivization
+                          operation={op}
+                          customer={pancakeCustomer?.ticketId === current.id ? pancakeCustomer.customer : null}
+                          banks={data.banks}
+                          index={index}
+                          onChange={patch => setOperations(rows => rows.map((row, i) => i === index ? { ...row, ...patch } : row))}
+                        /> : <>
+                          <BankSelect banks={rowBanks} value={op.bankId} placeholder="Selecciona banco" onChange={bankId => setOperations(rows => rows.map((row, i) => i === index ? { ...row, bankId } : row))} />
+                          <select value={op.debtRate} onChange={event => setOperations(rows => rows.map((row, i) => i === index ? { ...row, debtRate: event.target.value } : row))}>
+                            {[1, 1.5, 2, 2.5].map(rate => <option value={rate} key={rate}>{rate}% comisión · mín. S/ {MIN_DEBT_COMMISSION}</option>)}
                           </select>
-                        )}
-                        {rowIsDebt && (
-                          <select
-                            value={op.debtRate}
-                            onChange={(e) =>
-                              setOperations((rows) =>
-                                rows.map((x, i) =>
-                                  i === index ? { ...x, debtRate: e.target.value } : x,
-                                ),
-                              )
-                            }
-                          >
-                            {[1, 1.5, 2, 2.5].map((rate) => (
-                              <option value={rate} key={rate}>{rate}% comisión · mín. S/ {MIN_DEBT_COMMISSION}</option>
-                            ))}
-                          </select>
-                        )}
-                          {rowIsEfectivizacion &&
-                          ["BanBif", "Scotiabank"].includes(
-                            availableBanks.find((bank) => bank.id === op.bankId)
-                              ?.name || "",
-                          ) && (
-                            <select
-                              value={op.settlementTiming}
-                              onChange={(e) =>
-                                setOperations((rows) =>
-                                  rows.map((x, i) =>
-                                    i === index
-                                      ? {
-                                          ...x,
-                                          settlementTiming: e.target.value as OperationDraft["settlementTiming"],
-                                        }
-                                      : x,
-                                  ),
-                                )
-                              }
-                            >
-                              {settlementTimings.map((timing) => (
-                                <option value={timing.id} key={timing.id}>
-                                  {timing.label}
-                                </option>
-                              ))}
-                            </select>
-                          )}
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          placeholder="Monto S/"
-                          value={op.amount}
-                          onChange={(e) =>
-                            setOperations((rows) =>
-                              rows.map((x, i) =>
-                                i === index
-                                  ? { ...x, amount: e.target.value }
-                                  : x,
-                              ),
-                            )
-                          }
-                        />
-                        <button
-                          type="button"
-                          className="danger small"
-                          onClick={() =>
-                            setOperations((rows) =>
-                              rows.filter((_, i) => i !== index),
-                            )
-                          }
-                        >
-                          Quitar
-                        </button>
-                        {rowIsDebt && Number(op.amount) > 0 && (
-                          <p className="operation-preview">
-                            Comisión: <b>{money(debtCommission(Number(op.amount), Number(op.debtRate)))}</b> · Volumen neto: <b>{money(Math.max(0, Number(op.amount) - debtCommission(Number(op.amount), Number(op.debtRate))))}</b> · Utilidad: <b>{money(debtCommission(Number(op.amount), Number(op.debtRate)))}</b>
-                          </p>
-                        )}
+                          <input type="number" min="0" step="0.01" placeholder="Monto S/" value={op.amount} onChange={event => setOperations(rows => rows.map((row, i) => i === index ? { ...row, amount: event.target.value } : row))} />
+                        </>}
+                        <button type="button" className="danger small" onClick={() => setOperations(rows => rows.filter((_, i) => i !== index))}>Quitar</button>
+                        {!rowIsEfectivizacion && Number(op.amount) > 0 && <p className="operation-preview">Comisión: <b>{money(debtCommission(Number(op.amount), Number(op.debtRate)))}</b> · Volumen neto: <b>{money(Math.max(0, Number(op.amount) - debtCommission(Number(op.amount), Number(op.debtRate))))}</b> · Utilidad: <b>{money(debtCommission(Number(op.amount), Number(op.debtRate)))}</b></p>}
                       </div>;
                     })}
                     {effectivizationTotals.gross > 0 && <p className="operation-preview effectivization-total">

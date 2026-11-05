@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const ts = require('typescript');
 const enums = require('@prisma/client');
 const fields = load('lib/user-fields.ts', {});
-const commission = load('lib/effectivizacion.ts', {});
+const commission = load('lib/effectivizacion.ts', {}, {}, false);
 
 function load(file, dependencies, extras = {}, includeShared = true) {
   const code = ts.transpileModule(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true, jsx: ts.JsxEmit.ReactJSX } }).outputText;
@@ -19,6 +19,12 @@ function load(file, dependencies, extras = {}, includeShared = true) {
   return exports;
 }
 const sharedDependencies = {
+  './components/pancake-registration': { default: () => null },
+  './components/pancake-customer-details': { default: () => null },
+  './components/automatic-efectivization': { default: () => null },
+  '@/lib/registered-cards': load('lib/registered-cards.ts', {}, {}, false),
+  'next/server': { after: () => {} },
+  '@/lib/ticket-pancake': { warmWaitingPancake: async () => {} },
   '@/lib/app-fetch': { appBasePath: '', appFetch: (...args) => fetch(...args), appAsset: path => path },
   '@/lib/presence': load('lib/presence.ts', {}, {}, false),
   '@/lib/queue-order': load('lib/queue-order.ts', {}, {}, false),
@@ -65,7 +71,7 @@ test('ticket API requests only public user fields', async () => {
   assert.equal(query.include.assignedTo.select.name, true);
 });
 
-function completionFixture(sync = async () => ({ synced: true })) {
+function completionFixture(sync = async () => ({ synced: true }), bankName = 'BCP') {
   const state = { ticket: { id: 42, code: 'CON-001', serviceId: 1, status: 'IN_SERVICE', assignedToId: 1, branchId: 1, service: { id: 1, name: 'Consulta' }, assignedTo: { username: 'worker', dni: '12345678' }, clientName: 'Client Test', dni: '87654321', notes: null }, operations: [], history: [], syncs: 0 };
   const prisma = { $transaction: async fn => fn({
     ticket: {
@@ -77,7 +83,7 @@ function completionFixture(sync = async () => ({ synced: true })) {
       findUniqueOrThrow: async () => ({ ...state.ticket, operations: state.operations }),
     },
     service: { findUnique: async ({ where }) => ({ id: 2, name: where.name, active: true }) },
-    bank: { findUnique: async () => ({ id: 1, name: 'BCP', active: true }) },
+    bank: { findUnique: async () => ({ id: 1, name: bankName, active: true }) },
     rate: { findUnique: async () => ({ rate: 10 }) },
     operation: { create: async ({ data }) => { const created = { ...data, service: { name: data.serviceId === 2 ? 'Registro' : 'Consulta' }, bank: { name: 'BCP' } }; state.operations.push(created); return created; } },
     ticketHistory: { create: async ({ data }) => { state.history.push(data); return data; } },
@@ -259,16 +265,28 @@ test('automatic current-ticket changes clear drafts and absent active tickets cl
   fixture.render(); let tree = await fixture.settle();
   node(tree, n => n.type === 'button' && JSON.stringify(n.props.children).includes('Mi cola')).props.onClick(); tree = fixture.render();
   node(tree, n => n.type === 'button' && n.props.children === '+ Agregar operación').props.onClick(); tree = fixture.render();
-  node(tree, n => n.type === 'input' && n.props.placeholder === 'Monto S/').props.onChange({ target: { value: '100' } }); tree = fixture.render();
-  assert.equal(node(tree, n => n.type === 'input' && n.props.placeholder === 'Monto S/').props.value, '100');
+  node(tree, n => n.props.operation && typeof n.props.onChange === 'function').props.onChange({ amount: '100' }); tree = fixture.render();
+  assert.equal(node(tree, n => n.props.operation && typeof n.props.onChange === 'function').props.operation.amount, '100');
   active = { ...active, id: 43, code: 'EFEC-002' };
   node(tree, n => n.type === 'button' && JSON.stringify(n.props.children).includes('Inicio')).props.onClick(); tree = fixture.render();
   node(tree, n => n.type === 'button' && JSON.stringify(n.props.children).includes('Mi cola')).props.onClick(); tree = fixture.render();
   tree = await fixture.settle();
   const runTimers = async () => { const queued = fixture.timers.splice(0); await Promise.all(queued.map(timer => timer())); tree = await fixture.settle(); };
   await runTimers();
-  assert.equal(nodes(tree).filter(n => n.type === 'input' && n.props.placeholder === 'Monto S/').length, 0);
+  assert.equal(nodes(tree).filter(n => n.props.operation && typeof n.props.onChange === 'function').length, 0);
   active = null;
   await runTimers();
   node(tree, n => n.type === 'h2' && n.props.children === 'Sin atención activa');
+});
+
+test('completion stores the same rounded commission and net deposit shown by the automatic calculator', async () => {
+  for (const [bank, plan, amount, fee, rate] of [['BCP','ATK_1',2000,20,1],['BBVA','ATK_0_35',10000,50,.5],['Interbank','INTERBANK_2',1000,30,2],['Scotiabank','ATK_0_35',1000,20,1],['IO','ATK_1',20000,30,0]]) {
+    const {state,handler}=completionFixture(undefined,bank);
+    state.ticket.service.name='Efectivización';
+    const response=await handler.POST(request({successful:true,operations:[{serviceName:'Efectivización',bankId:1,amount,commissionPlan:plan,settlementTiming:'SAME_DAY'}]}),params);
+    assert.equal(response.status,200,bank);
+    assert.equal(state.operations[0].profit,fee,bank);
+    assert.equal(state.operations[0].amount,amount-fee,bank);
+    assert.equal(state.operations[0].rate,rate,bank);
+  }
 });

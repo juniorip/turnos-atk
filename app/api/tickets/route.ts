@@ -6,6 +6,9 @@ import { createTicket } from "@/lib/ticket";
 import { sortTicketsForCall } from "@/lib/queue-order";
 import { publicUserFields } from "@/lib/user-fields";
 import { LIMA_DISTRICTS } from "@/lib/lima-districts";
+import { after } from "next/server";
+import { warmWaitingPancake } from "@/lib/ticket-pancake";
+export const maxDuration = 60;
 const schema=z.object({dni:z.string().regex(/^\d{6,12}$/),documentType:z.enum(["DNI","CE"]).default("DNI"),clientName:z.string().min(3),district:z.enum(LIMA_DISTRICTS),isPreferential:z.boolean().default(false),serviceId:z.number().int(),phone:z.string().optional(),notes:z.string().optional(),branchId:z.number().int().optional()});
 export async function GET(request: Request) {
   try {
@@ -23,7 +26,9 @@ export async function GET(request: Request) {
       where: { ...where, status: { in: [TicketStatus.WAITING, TicketStatus.CALLED, TicketStatus.IN_SERVICE] } },
       include: { service: true, branch: { select: { id: true, name: true } }, assignedTo: { select: publicUserFields } },
     });
-    return Response.json({ tickets: sortTicketsForCall(tickets) });
+    const sorted = sortTicketsForCall(tickets);
+    after(() => warmWaitingPancake(sorted.filter(ticket => ticket.status === TicketStatus.WAITING)));
+    return Response.json({ tickets: sorted });
   } catch (error) { return errorResponse(error); }
 }
 export async function POST(request: Request) {
@@ -35,6 +40,7 @@ export async function POST(request: Request) {
     const branchId = user.role === UserRole.ADMIN ? requestedBranchId ?? user.branchId : user.branchId;
     if (!branchId) return Response.json({ error: "Selecciona una sede." }, { status: 400 });
     const ticket = await createTicket({ ...data, branchId, createdById: user.id });
+    after(() => warmWaitingPancake([ticket]));
     return Response.json({ ticket }, { status: 201 });
   } catch (error) {
     if (error instanceof Error && error.message === "CATALOG_UNAVAILABLE") return Response.json({ error: "La sede o el trámite no están disponibles." }, { status: 400 });

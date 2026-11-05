@@ -128,11 +128,23 @@ model Ticket {
   largeRoom      LargeRoom?      @relation(fields: [largeRoomId], references: [id], onDelete: SetNull)
   history        TicketHistory[]
   operations     Operation[]
+  pancakeSnapshot TicketPancakeSnapshot?
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
   @@index([branchId, status, arrivedAt])
   @@index([largeRoomId, status])
+}
+
+model TicketPancakeSnapshot {
+  ticketId   Int      @id
+  dni        String
+  result     Json?
+  checkedAt  DateTime?
+  expiresAt  DateTime @default(now())
+  leaseUntil DateTime?
+  claimKey   String?
+  ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 }
 
 model LargeRoom {

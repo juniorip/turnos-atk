@@ -4,6 +4,11 @@ Confirmadas por el usuario el 4 de noviembre de 2026. Implementadas en la
 calculadora local de `public/buscar-cliente.html`, con reglas compartidas en
 `public/buscar-cliente-utils.js`.
 
+El formulario de efectivización del asesor también usa estas mismas reglas.
+`lib/effectivizacion.ts` las reutiliza al guardar, agregar o editar operaciones,
+de modo que la comisión y el neto no difieran de la vista previa. Los importes se
+redondean a céntimos y se rechazan montos que no dejan un depósito positivo.
+
 ## Perfil del cliente en Pancake
 
 Las notas tienen prioridad sobre el alias. Solo existen tres perfiles:

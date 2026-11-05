@@ -44,7 +44,7 @@ function notesFromCustomer(value: unknown): string[] {
 }
 
 /** Searches conversation aliases (where Pancake stores the DNI) and returns the customer's saved profile and notes. */
-export async function lookupPancakeCustomerByDni(dni: string): Promise<PancakeDniLookupResult> {
+export async function lookupPancakeCustomerByDni(dni: string, options: { signal?: AbortSignal } = {}): Promise<PancakeDniLookupResult> {
   const pageId = process.env.PANCAKE_PAGE_ID?.trim();
   const pageToken = process.env.PANCAKE_PAGE_ACCESS_TOKEN?.trim();
   if (!pageId || !pageToken) return { ok: false, reason: "not_configured" };
@@ -61,7 +61,7 @@ export async function lookupPancakeCustomerByDni(dni: string): Promise<PancakeDn
       const query = new URLSearchParams({ page_access_token: pageToken, page_size: "60" });
       if (cursor) query.set("last_conversation_id", cursor);
       const response = await fetch(`${PANCAKE_API_V2}/pages/${encodeURIComponent(pageId)}/conversations?${query}`, {
-        method: "GET", cache: "no-store", signal: AbortSignal.timeout(15000),
+        method: "GET", cache: "no-store", signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
       });
       if (response.status === 401 || response.status === 403) return { ok: false, reason: "unauthorized" };
       if (!response.ok) return { ok: false, reason: "unavailable" };

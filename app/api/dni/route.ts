@@ -9,7 +9,24 @@ export async function POST(request: Request) {
     if (!parsed.success) return Response.json({ error: "Ingresa un DNI válido de 8 dígitos." }, { status: 400 });
 
     const token = process.env.JSONPE_API_TOKEN;
-    if (!token) return Response.json({ error: "La consulta de DNI aún no está configurada." }, { status: 503 });
+    if (!token) {
+      // La demo usa la misma validación del registro publicado sin copiar su clave.
+      if (process.env.NODE_ENV === "development" && process.env.TURNOS_LOCAL_DEMO_AUTH === "1") {
+        const response = await fetch("https://atkportal.app/turnos/api/dni", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(parsed.data),
+          cache: "no-store",
+          signal: AbortSignal.timeout(15000),
+        });
+        const result = await response.json().catch(() => null);
+        if (!response.ok || !result?.fullName || result.document !== parsed.data.document) {
+          return Response.json({ error: result?.error || "No se pudo validar el documento." }, { status: response.ok ? 502 : response.status });
+        }
+        return Response.json({ document: result.document, fullName: result.fullName }, { headers: { "Cache-Control": "no-store" } });
+      }
+      return Response.json({ error: "La consulta de DNI aún no está configurada." }, { status: 503 });
+    }
 
     const isDni = parsed.data.documentType === "DNI";
     if (isDni && !/^\d{8}$/.test(parsed.data.document)) return Response.json({ error: "El DNI debe tener 8 dígitos." }, { status: 400 });
