@@ -4,7 +4,6 @@ import { prisma } from "@/lib/prisma";
 import { canonicalBranchCode, ensureCoreBranches } from "@/lib/branches";
 
 const voiceId = "EXAVITQu4vr4xnSDxMaL"; // Sarah, voz predeterminada disponible en el plan gratuito.
-const client = new ElevenLabsClient();
 
 function displayName(clientName: string) {
   const [lastNames, firstNames] = clientName.split(",");
@@ -48,6 +47,7 @@ export async function GET(request: Request) {
   }
 
   try {
+    const client = new ElevenLabsClient();
     const audio = await client.textToSpeech.convert(voiceId, {
       text,
       modelId: "eleven_flash_v2_5",

@@ -14,28 +14,6 @@ type QueueState = {
   error?: string;
 };
 
-function attentionChime() {
-  try {
-    const Ctx = window.AudioContext || (window as any).webkitAudioContext;
-    const ctx = new Ctx();
-    void ctx.resume();
-    // Timbre de tres tonos, pensado para una TV/sala de espera.
-    [740, 1040, 740].forEach((frequency, index) => {
-      const oscillator = ctx.createOscillator(), gain = ctx.createGain();
-      oscillator.connect(gain); gain.connect(ctx.destination);
-      oscillator.type = "triangle";
-      oscillator.frequency.value = frequency;
-      const start = ctx.currentTime + index * .34;
-      gain.gain.setValueAtTime(0.0001, start);
-      gain.gain.exponentialRampToValueAtTime(.42, start + .035);
-      gain.gain.exponentialRampToValueAtTime(.0001, start + .29);
-      oscillator.start(start);
-      oscillator.stop(start + .31);
-    });
-    setTimeout(() => ctx.close(), 1400);
-  } catch { /* el navegador volverá a intentarlo en el siguiente ciclo */ }
-}
-
 export default function PantallaPublica() {
   const params = useParams<{ sede: string }>();
   const rawBranch = String(params.sede || "").trim().toUpperCase();
@@ -47,6 +25,18 @@ export default function PantallaPublica() {
   const [soundTestMode, setSoundTestMode] = useState<boolean | null>(null);
   const previousCodes = useRef<Set<string>>(new Set());
   const firstLoad = useRef(true);
+  const callAudio = useRef<HTMLAudioElement | null>(null);
+  function attentionChime() {
+    const audio = callAudio.current ?? new Audio(appAsset("/audio/llamado-ding-dong.mp3"));
+    callAudio.current = audio;
+    audio.volume = .75;
+    audio.currentTime = 0;
+    void audio.play().catch(() => { /* El botón de sonido permite desbloquear el audio. */ });
+  }
+  useEffect(() => () => {
+    callAudio.current?.pause();
+    callAudio.current = null;
+  }, []);
   function toggleSound() {
     setSoundEnabled((enabled) => {
       if (!enabled) {
@@ -108,7 +98,10 @@ export default function PantallaPublica() {
     if (!soundEnabled || !callingSignature) return;
     attentionChime();
     const repeat = setInterval(attentionChime, 4800);
-    return () => clearInterval(repeat);
+    return () => {
+      clearInterval(repeat);
+      callAudio.current?.pause();
+    };
   }, [soundEnabled, callingSignature]);
 
   if (state?.error) return <main className="screen-page"><p className="screen-error">{state.error}</p></main>;

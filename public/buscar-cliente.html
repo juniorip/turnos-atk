@@ -14,7 +14,10 @@
     #status{min-height:24px;color:var(--muted);margin:15px 0 0}.error{color:var(--red)!important}.result{display:none;margin-top:18px}.result h2{font-size:18px;margin:0 0 12px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.item{background:var(--panel2);border:1px solid var(--border);border-radius:9px;padding:12px;min-width:0}.item small{display:block;color:var(--muted);font-size:12px;margin-bottom:4px}.item strong{overflow-wrap:anywhere}.notes{margin-top:12px}.notes h3{font-size:14px;margin:0 0 8px}.account{display:grid;grid-template-columns:minmax(130px,.7fr) 1.3fr;gap:10px;align-items:center;background:#0b1726;border:1px solid #263d58;border-radius:8px;padding:10px 12px;margin-top:7px}.account small{color:var(--muted)}.account strong{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.notes-original{margin-top:14px;border-top:1px solid var(--border);padding-top:10px}.notes-original summary{cursor:pointer;color:#a9c5e4;font-size:13px;font-weight:700}.note{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b1726;border:1px solid #263d58;border-radius:8px;padding:12px;margin-top:8px;color:#e1eaf7}.empty{color:var(--muted);background:var(--panel2);padding:13px;border-radius:8px}.hint{font-size:12px;color:var(--muted);margin-top:20px}
     .spinner{display:inline-block;width:14px;height:14px;border:2px solid #7890ad;border-top-color:transparent;border-radius:50%;vertical-align:-2px;margin-right:7px;animation:spin .7s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
     .gate{max-width:460px}.gate form{display:grid;grid-template-columns:1fr}.gate button{width:100%}.divider{height:1px;background:var(--border);margin:20px 0}.hidden{display:none!important}
+    select{width:100%;min-height:44px;background:#0b1726;border:1px solid #385575;border-radius:8px;color:var(--text);font:inherit;padding:9px 12px}select:focus{outline:2px solid var(--blue);outline-offset:2px}select:disabled{opacity:.8}.account{grid-template-columns:minmax(0,1fr) auto}.account small{display:block}.account button{height:34px;padding:0 12px;background:#1a2d43;border:1px solid #385575;white-space:nowrap;font-size:12px}.calculator{margin-top:24px;border-top:1px solid var(--border);padding-top:20px}.calculator h3{margin:0;font-size:19px}.calculator .intro{font-size:13px;margin:5px 0 16px}.calculator form{display:grid;grid-template-columns:1fr 1fr;align-items:start;gap:14px}.calculator .field{min-width:0}.money-input{position:relative}.money-input span{position:absolute;top:10px;left:12px;color:var(--muted)}.money-input input{padding-left:42px;font-variant-numeric:tabular-nums}.calc-status{margin:12px 0;color:var(--muted);font-size:13px;min-height:20px}.calculation{border:1px solid var(--border);background:#0b1726;border-radius:10px;padding:16px}.calculation dl{margin:0}.calculation dl>div{display:flex;justify-content:space-between;gap:12px;margin:0 0 9px}.calculation dt{color:var(--muted)}.calculation dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}.calculation .deposit{border-top:1px solid var(--border);padding-top:13px;margin:13px 0 0;align-items:center}.deposit dt{color:var(--text);font-weight:700}.deposit dd{font-size:26px;font-weight:800;color:var(--green)}.fee-explanation{margin:10px 0 0;color:var(--muted);font-size:12px}
     @media(max-width:520px){form{align-items:stretch;flex-direction:column}.grid{grid-template-columns:1fr}button{width:100%}.panel{padding:16px}}
+    @media(max-width:520px){.calculator form{grid-template-columns:1fr}.account{grid-template-columns:1fr}.account button{width:auto;justify-self:start}.deposit dd{font-size:23px}}
+    .notes-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.notes-heading h3{margin:0}.notes-heading button{height:36px;padding:0 13px;background:#1a2d43;border:1px solid #385575;font-size:13px;width:auto}.notes-status{color:var(--muted);font-size:12px;margin:7px 0 0;min-height:18px}.account .card-number{letter-spacing:.08em}
   </style>
 </head>
 <body>
@@ -46,17 +49,39 @@
           <div class="item"><small>Alias / título</small><strong id="alias"></strong></div>
           <div class="item"><small>Nombre del perfil</small><strong id="profile"></strong></div>
           <div class="item"><small>DNI</small><strong id="shown-dni"></strong></div>
-          <div class="item"><small>Porcentaje</small><strong id="rate"></strong></div>
+          <div class="item"><small>Perfil de comisión</small><strong id="rate"></strong></div>
           <div class="item"><small>Correo</small><strong id="email"></strong></div>
           <div class="item"><small>Dirección</small><strong id="address"></strong></div>
         </div>
-        <div class="notes"><h3>Bancos y cuentas</h3><div id="accounts"></div></div>
+        <div class="notes"><div class="notes-heading"><h3>Bancos, tarjetas y cuentas</h3><button id="refresh-notes" type="button" disabled>Actualizar notas</button></div><p id="notes-status" class="notes-status" role="status" aria-live="polite"></p><div id="accounts"></div></div>
+        <section id="calculator" class="calculator" aria-labelledby="calculator-title">
+          <h3 id="calculator-title">Calcular depósito</h3>
+          <p class="intro">Ingresa el monto de la operación. Se descontará la comisión del banco para obtener el depósito en soles.</p>
+          <form id="calculator-form">
+            <div class="field"><label for="calc-bank">Banco o tarjeta</label><select id="calc-bank"><option value="">Selecciona un banco</option></select></div>
+            <div class="field"><label for="calc-amount">Monto de la operación (S/)</label><div class="money-input"><span aria-hidden="true">S/</span><input id="calc-amount" type="text" inputmode="decimal" maxlength="24" autocomplete="off" placeholder="Ej. 2,000.00" aria-describedby="calc-status"></div></div>
+            <div id="calc-timing-field" class="field hidden"><label for="calc-timing">Plazo del depósito</label><select id="calc-timing"><option value="same-day">Mismo día</option></select></div>
+            <div class="field"><label for="calc-profile">Perfil de comisión del cliente</label><select id="calc-profile"><option value="">Confirma el perfil</option><option value="0.35%">0.35%</option><option value="0.5%">0.5%</option><option value="1%">1%</option></select></div>
+          </form>
+          <p id="calc-status" class="calc-status" role="status" aria-live="polite">Ingresa un monto para calcular el depósito.</p>
+          <div id="calculation" class="calculation hidden" aria-live="polite">
+            <dl>
+              <div><dt>Monto de la operación</dt><dd id="quote-amount"></dd></div>
+              <div><dt>Tarifa del banco</dt><dd id="quote-rate"></dd></div>
+              <div><dt>Comisión a descontar</dt><dd id="quote-fee"></dd></div>
+              <div class="deposit"><dt>Se deposita</dt><dd id="quote-deposit"></dd></div>
+            </dl>
+            <p id="quote-explanation" class="fee-explanation"></p>
+          </div>
+        </section>
         <details class="notes-original"><summary>Ver notas originales de Pancake</summary><div id="notes"></div></details>
       </section>
       <p class="hint">Los datos se consultan al momento y no se guardan en Turnos.</p>
     </section>
   </main>
+  <script src="./buscar-cliente-utils.js"></script>
   <script>
+    const {profiles,banks,resolveCommission,extractAccounts,extractCards,getNoteBankOptions,parseAmountCents,calculateDeposit}=TurnosCustomerTools;
     const loginForm=document.getElementById('login-form'),loginButton=document.getElementById('login-submit'),loginStatus=document.getElementById('login-status'),loginPanel=document.getElementById('login-panel'),searchPanel=document.getElementById('search-panel');
     loginForm.addEventListener('submit',async(event)=>{
       event.preventDefault();loginButton.disabled=true;loginButton.innerHTML='<span class="spinner"></span>Validando';loginStatus.className='';loginStatus.textContent='Validando acceso…';
@@ -73,32 +98,115 @@
     document.getElementById('logout').addEventListener('click',async()=>{try{await fetch(new URL('api/auth/logout',location.href),{method:'POST',credentials:'same-origin'})}catch{}location.reload()});
     const form=document.getElementById('search-form'),input=document.getElementById('dni'),button=document.getElementById('submit'),statusBox=document.getElementById('status'),result=document.getElementById('result');
     const setText=(id,value)=>document.getElementById(id).textContent=value||'—';
-    function parseCustomerNotes(notes){
-      const doc=document.implementation.createHTMLDocument('');const plain=[];const emails=[];
-      for(const raw of notes||[]){const box=doc.createElement('div');box.innerHTML=raw;box.querySelectorAll('a[href]').forEach(a=>{const match=(a.getAttribute('href')||'').match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);if(match)emails.push(match[0])});plain.push(box.textContent.replace(/\u00a0/g,' ').replace(/\r/g,'').trim())}
-      const lines=plain.join('\n').split('\n').map(line=>line.trim()).filter(Boolean);const email=emails[0]||plain.join('\n').match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0]||'';
-      const rate=lines.map(line=>line.match(/(?:ATK\s*)?(\d+(?:[.,]\d+)?)\s*%/i)?.[1]).find(Boolean)||'';
-      const address=lines.find(line=>/^(?:AV\.?|AVENIDA|JR\.?|JIRON|JIRÓN|CALLE|CL\.?|PASAJE|PSJE\.?|URB\.?|MZ\.?|LOTE|ASOC\.?|PROLONG\.?|CARRETERA|PJE\.?|MALECÓN|MALECON)\b/i.test(line))||'';
-      const defs=[['Interbank',/\b(?:IBK|INTERBANK)\b/i],['BCP',/\bBCP\b/i],['BBVA',/\bBBVA\b/i],['Scotiabank',/\b(?:SCO|SCOTIABANK)\b/i],['BanBif',/\bBANBIF\b/i],['CMR',/\bCMR\b/i],['IO',/\bIO\b/i],['Tarjeta Comercial',/\b(?:TARJETA\s+COMERCIAL|TC\s+COMERCIAL)\b/i]];const accounts=[];
-      for(const line of lines){for(const [bank,pattern] of defs){const hit=line.match(pattern);if(!hit)continue;const tail=line.slice(hit.index+hit[0].length);const nums=tail.match(/\d[\d\s-]{5,}\d/g)?.map(value=>value.replace(/\D/g,''))||[];const account=nums.sort((a,b)=>b.length-a.length)[0];if(account&&!accounts.some(row=>row.bank===bank&&row.account===account))accounts.push({bank,account});break}}
-      return{plain,accounts,email,address,rate:rate?`${rate.replace(',','.')}%`:''};
+    const bankSelect=document.getElementById('calc-bank'),amountInput=document.getElementById('calc-amount'),timingSelect=document.getElementById('calc-timing'),profileSelect=document.getElementById('calc-profile'),calcStatus=document.getElementById('calc-status'),calculation=document.getElementById('calculation');
+    const refreshButton=document.getElementById('refresh-notes'),notesStatus=document.getElementById('notes-status');
+    let activeCustomer=null,activeDni='',refreshSequence=0;
+    const money=cents=>`S/ ${(cents/100).toLocaleString('es-PE',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+    function updateTiming(preferred=timingSelect.value){
+      const previous=preferred;timingSelect.replaceChildren(new Option('Mismo día','same-day'));
+      const delayed=['banbif','scotiabank'].includes(bankSelect.value);
+      if(delayed)timingSelect.add(new Option('Siguiente día hábil','next-day'));
+      document.getElementById('calc-timing-field').classList.toggle('hidden',!delayed);
+      timingSelect.disabled=!delayed;timingSelect.value=delayed&&previous==='next-day'?'next-day':'same-day';
     }
+    function updateCalculation(){
+      calculation.classList.add('hidden');calcStatus.classList.remove('error');
+      const showStatus=(message,error=false)=>{calcStatus.textContent=message;calcStatus.classList.toggle('error',error)};
+      if(bankSelect.disabled){showStatus('No se identificaron bancos en las notas. Actualízalas después de registrar la tarjeta.');return}
+      if(!amountInput.value.trim()){showStatus('Ingresa un monto para calcular el depósito.');return}
+      const amountCents=parseAmountCents(amountInput.value);
+      if(amountCents===null){showStatus('Ingresa un monto positivo válido, con un máximo de dos decimales.',true);return}
+      if(!bankSelect.value){showStatus('Selecciona el banco o la tarjeta de la operación.');return}
+      if(!profiles.includes(profileSelect.value)){showStatus('Confirma uno de los tres perfiles para realizar el cálculo.');return}
+      const quote=calculateDeposit({amountCents,bankId:bankSelect.value,profile:profileSelect.value,timing:timingSelect.value});
+      if(!quote.ok){showStatus(quote.reason==='amount_below_fee'?`El monto debe ser mayor que la comisión de ${money(quote.commissionCents)}.`:'Revisa el banco, el plazo y el perfil seleccionados.',true);return}
+      setText('quote-amount',money(quote.amountCents));setText('quote-rate',quote.flatCents!==undefined?'S/ 30.00 fijos':`${quote.rateBps/100}%`);
+      setText('quote-fee',money(quote.commissionCents));setText('quote-deposit',money(quote.depositCents));
+      const bank=banks.find(bank=>bank.id===bankSelect.value);
+      const explanation=quote.flatCents!==undefined?'iO: comisión fija de S/ 30.00 para cualquier monto y perfil.':quote.minimumApplied?`Se aplica la comisión mínima de ${money(quote.minimumCents)}.`:`Comisión del ${quote.rateBps/100}%, con mínimo de ${money(quote.minimumCents)}.`;
+      setText('quote-explanation',explanation);showStatus(bank.name+(['banbif','scotiabank'].includes(bank.id)?` · ${timingSelect.selectedOptions[0].textContent}`:''));calculation.classList.remove('hidden');
+    }
+    function resetCalculator(){
+      amountInput.value='';bankSelect.replaceChildren(new Option('Selecciona un banco',''));bankSelect.disabled=true;amountInput.disabled=true;profileSelect.value='';profileSelect.disabled=false;
+      updateTiming();updateCalculation();
+    }
+    function setupCalculator(parsed,preserve=false){
+      const previous={amount:amountInput.value,bank:bankSelect.value,timing:timingSelect.value,profile:profileSelect.value};
+      resetCalculator();
+      for(const option of parsed.bankOptions)bankSelect.add(new Option(option.label,option.id));
+      bankSelect.disabled=!parsed.bankOptions.length;amountInput.disabled=bankSelect.disabled;
+      bankSelect.value=preserve&&previous.bank?(parsed.bankOptions.some(bank=>bank.id===previous.bank)?previous.bank:''):(parsed.bankOptions[0]?.id||'');
+      profileSelect.value=profiles.includes(parsed.rate)?parsed.rate:preserve&&parsed.rate!=='Por confirmar'?previous.profile:'';profileSelect.disabled=profiles.includes(parsed.rate);
+      if(preserve)amountInput.value=previous.amount;
+      updateTiming(preserve?previous.timing:'same-day');updateCalculation();
+    }
+    document.getElementById('calculator-form').addEventListener('submit',event=>event.preventDefault());
+    bankSelect.addEventListener('change',()=>{updateTiming();updateCalculation()});
+    for(const field of [amountInput,timingSelect,profileSelect])field.addEventListener(field===amountInput?'input':'change',updateCalculation);
+    let searchVersion=0;
+    function clearActiveCustomer(){activeCustomer=null;activeDni='';refreshSequence++;refreshButton.disabled=true;refreshButton.textContent='Actualizar notas';notesStatus.textContent='';notesStatus.classList.remove('error')}
+    input.addEventListener('input',()=>{searchVersion++;clearActiveCustomer();result.style.display='none';resetCalculator();statusBox.textContent=''});
+    function parseCustomerNotes(notes,alias=''){
+      const doc=document.implementation.createHTMLDocument('');const plain=[];const emails=[];
+      for(const raw of notes||[]){const box=doc.createElement('div');box.innerHTML=raw;box.querySelectorAll('a[href]').forEach(a=>{const match=(a.getAttribute('href')||'').match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);if(match)emails.push(match[0])});box.querySelectorAll('br').forEach(br=>br.replaceWith('\n'));box.querySelectorAll('p,div,li,tr').forEach(block=>block.append('\n'));plain.push(box.textContent.replace(/\u00a0/g,' ').replace(/\r/g,'').trim())}
+      const lines=plain.join('\n').split('\n').map(line=>line.trim()).filter(Boolean);const email=emails[0]||plain.join('\n').match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0]||'';
+      const rate=resolveCommission(plain,alias);
+      const address=lines.find(line=>/^(?:AV\.?|AVENIDA|JR\.?|JIRON|JIRÓN|CALLE|CL\.?|PASAJE|PSJE\.?|URB\.?|MZ\.?|LOTE|ASOC\.?|PROLONG\.?|CARRETERA|PJE\.?|MALECÓN|MALECON)\b/i.test(line))||'';
+      const accounts=extractAccounts(plain),cards=extractCards(plain),bankOptions=getNoteBankOptions(plain);
+      return{plain,accounts,cards,bankOptions,email,address,rate};
+    }
+    function renderCustomerNotes(customer,preserve=false){
+      const parsed=parseCustomerNotes(customer.notes,customer.alias);
+      setText('rate',parsed.rate);setText('email',parsed.email);setText('address',parsed.address);
+      const accounts=document.getElementById('accounts');accounts.replaceChildren();
+      const rows=[...parsed.cards.map(card=>({...card,kind:'Tarjeta',account:`•••• ${card.lastFour}`})),...parsed.accounts];
+      for(const bank of parsed.bankOptions)if(!rows.some(row=>row.bankId===bank.id))rows.push({bankId:bank.id,bank:bank.name,kind:'Banco en notas',account:'Sin número de cuenta registrado.'});
+      for(const row of rows){
+        const item=document.createElement('div');item.className='account';const info=document.createElement('div');
+        const label=document.createElement('small');label.textContent=`${row.bank} · ${row.kind}`;
+        const number=document.createElement('strong');number.textContent=row.account;if(row.kind==='Tarjeta')number.className='card-number';info.append(label,number);item.append(info);
+        if(row.bankId&&parsed.bankOptions.some(bank=>bank.id===row.bankId)){
+          const use=document.createElement('button');use.type='button';use.textContent='Usar banco';
+          use.setAttribute('aria-label',`Calcular con ${row.bank}, ${row.kind}${row.kind==='Banco en notas'?'':` terminada en ${row.lastFour||row.account.slice(-4)}`}`);
+          use.addEventListener('click',()=>{bankSelect.value=row.bankId;updateTiming();updateCalculation();amountInput.focus()});item.append(use);
+        }
+        accounts.append(item);
+      }
+      if(!rows.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='No se identificaron bancos, tarjetas ni cuentas en las notas. Puedes actualizarlas después de registrar una tarjeta.';accounts.append(empty)}
+      setupCalculator(parsed,preserve);
+      const notes=document.getElementById('notes');notes.replaceChildren();
+      if(parsed.plain.length){for(const text of parsed.plain){const div=document.createElement('div');div.className='note';div.textContent=text;notes.append(div)}}else{const div=document.createElement('div');div.className='empty';div.textContent='El perfil no tiene notas guardadas.';notes.append(div)}
+    }
+    async function readCustomer(dni){
+      const endpoint=new URL('api/integrations/pancake/customers',location.href);endpoint.searchParams.set('dni',dni);
+      const response=await fetch(endpoint,{credentials:'same-origin',cache:'no-store'});const data=await response.json();
+      if(!response.ok)throw new Error(response.status===401?'La sesión venció. Vuelve a iniciar sesión como administrador.':data.error||({not_configured:'Falta configurar Pancake en el servidor.',unauthorized:'Pancake rechazó las credenciales.',unavailable:'Pancake no respondió. Inténtalo nuevamente.',api_rejected:'Pancake rechazó la consulta.',invalid_response:'Pancake respondió en un formato inesperado.'}[data.reason])||'No se pudo realizar la búsqueda.');
+      return data;
+    }
+    refreshButton.addEventListener('click',async()=>{
+      if(!activeCustomer||!activeDni)return;
+      const customer=activeCustomer,dni=activeDni,version=searchVersion,sequence=++refreshSequence;
+      const current=()=>version===searchVersion&&sequence===refreshSequence&&activeCustomer===customer&&activeDni===dni;
+      refreshButton.disabled=true;refreshButton.textContent='Actualizando…';notesStatus.classList.remove('error');notesStatus.textContent='Consultando las notas actuales en Pancake…';
+      try{
+        const data=await readCustomer(dni);if(!current())return;
+        if(!data.found||!data.customer||!Array.isArray(data.customer.notes))throw new Error('No se pudieron obtener las notas actuales del cliente.');
+        customer.notes=data.customer.notes;renderCustomerNotes(customer,true);notesStatus.textContent='Notas actualizadas. Tarjetas, cuentas y bancos revisados.';
+      }catch(error){if(current()){notesStatus.classList.add('error');notesStatus.textContent=`${error instanceof Error?error.message:'No se pudieron actualizar las notas.'} Se mantienen las notas anteriores.`}}
+      finally{if(current()){refreshButton.disabled=false;refreshButton.textContent='Actualizar notas'}}
+    });
     form.addEventListener('submit',async(event)=>{
-      event.preventDefault();const dni=input.value.replace(/\D/g,'');result.style.display='none';statusBox.className='';
+      event.preventDefault();const dni=input.value.replace(/\D/g,'');const version=++searchVersion;clearActiveCustomer();result.style.display='none';resetCalculator();statusBox.className='';statusBox.style.color='';
       if(dni.length<8||dni.length>12){statusBox.textContent='Ingresa un DNI de 8 a 12 dígitos.';statusBox.className='error';return}
       button.disabled=true;button.innerHTML='<span class="spinner"></span>Buscando';statusBox.textContent='Buscando el DNI en los alias de Pancake…';
       try{
-        const endpoint=new URL('api/integrations/pancake/customers',location.href);endpoint.searchParams.set('dni',dni);
-        const response=await fetch(endpoint,{credentials:'same-origin',cache:'no-store'});const data=await response.json();
-        if(!response.ok)throw new Error(response.status===401?'Inicia sesión como administrador en http://localhost:3000 y vuelve a abrir este buscador en la misma ventana.':data.error||({not_configured:'Falta configurar Pancake en el servidor.',unauthorized:'Pancake rechazó las credenciales. Revisa la conexión de la página.',unavailable:'Pancake no respondió. Inténtalo nuevamente.',api_rejected:'Pancake rechazó la consulta.',invalid_response:'Pancake respondió en un formato inesperado.'}[data.reason])||'No se pudo realizar la búsqueda.');
+        const data=await readCustomer(dni);
+        if(version!==searchVersion)return;
         if(!data.found||!data.customer){statusBox.textContent=data.complete?'No se encontró ese DNI en los alias consultados.':'No apareció en el tramo revisado. Prueba de nuevo más tarde o amplía el historial de búsqueda.';return}
-        const customer=data.customer,parsed=parseCustomerNotes(customer.notes);setText('alias',customer.alias);setText('profile',customer.profileName);setText('shown-dni',dni);setText('rate',parsed.rate);setText('email',parsed.email);setText('address',parsed.address);
-        const accounts=document.getElementById('accounts');accounts.replaceChildren();
-        if(parsed.accounts.length){parsed.accounts.forEach(row=>{const item=document.createElement('div');item.className='account';const bank=document.createElement('small');bank.textContent=row.bank;const number=document.createElement('strong');number.textContent=row.account;item.append(bank,number);accounts.append(item)})}else{const empty=document.createElement('div');empty.className='empty';empty.textContent='No se identificaron bancos y cuentas en las notas.';accounts.append(empty)}
-        const notes=document.getElementById('notes');notes.replaceChildren();
-        if(parsed.plain.length){parsed.plain.forEach(text=>{const div=document.createElement('div');div.className='note';div.textContent=text;notes.append(div)})}else{const div=document.createElement('div');div.className='empty';div.textContent='El perfil no tiene notas guardadas.';notes.append(div)}
+        activeCustomer=data.customer;activeDni=dni;setText('alias',activeCustomer.alias);setText('profile',activeCustomer.profileName);setText('shown-dni',dni);
+        renderCustomerNotes(activeCustomer);refreshButton.disabled=false;
         statusBox.textContent=`Cliente encontrado · ${data.scanned} conversaciones revisadas.`;statusBox.style.color='var(--green)';result.style.display='block';
-      }catch(error){statusBox.textContent=error instanceof Error?error.message:'Ocurrió un error al consultar Pancake.';statusBox.className='error'}
+      }catch(error){if(version!==searchVersion)return;statusBox.textContent=error instanceof Error?error.message:'Ocurrió un error al consultar Pancake.';statusBox.className='error'}
       finally{button.disabled=false;button.textContent='Buscar'}
     });
   </script>
