@@ -16,6 +16,9 @@
     { id: 'io', name: 'iO', aliases: 'I[ .]*O' },
     { id: 'sip', name: 'SIP', aliases: 'SIP' },
     { id: 'cencosud', name: 'Cencosud', aliases: 'CENCOSUD' },
+    // Santander is recognized as a card issuer in Pancake notes and settles
+    // through the commercial-card tariff in Turnos.
+    { id: 'santander', name: 'Santander', aliases: 'SANTANDER' },
     { id: 'ripley', name: 'Ripley', aliases: '(?:BANCO[ ]+)?RIPLEY' },
     { id: 'diners', name: 'Diners Club', aliases: 'DINERS(?:[ ]+CLUB)?' },
   ];

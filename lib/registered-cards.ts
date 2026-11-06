@@ -4,7 +4,7 @@ import { extractCards, getNoteBankOptions, resolveCommission } from "../public/b
 
 export type CustomerProfile = "0.35%" | "0.5%" | "1%";
 export type RegisteredCard = { key: string; bankKey: string; bankName: string; bankId: number | null; lastFour?: string };
-const databaseBankNames: Record<string, string> = { bcp: "BCP", bbva: "BBVA", interbank: "Interbank", scotiabank: "Scotiabank", banbif: "BanBif", cmr: "CMR", io: "IO", sip: "Tarjeta Comercial", cencosud: "Tarjeta Comercial", ripley: "Tarjeta Comercial", diners: "Tarjeta Comercial" };
+const databaseBankNames: Record<string, string> = { bcp: "BCP", bbva: "BBVA", interbank: "Interbank", scotiabank: "Scotiabank", banbif: "BanBif", cmr: "CMR", io: "IO", sip: "Tarjeta Comercial", cencosud: "Tarjeta Comercial", santander: "Tarjeta Comercial", ripley: "Tarjeta Comercial", diners: "Tarjeta Comercial" };
 export function plainPancakeNotes(customer: PancakeDniCustomer) {
   return customer.notes.map(note => note.replace(/<\s*br\s*\/?\s*>/gi, "\n").replace(/<\/(?:p|div|li|tr)>/gi, "\n").replace(/<[^>]*>/g, "").replace(/&nbsp;|&#160;/gi, " ").replace(/&amp;/gi, "&").trim());
 }
@@ -17,7 +17,10 @@ export function getRegisteredCards(customer: PancakeDniCustomer | null, banks: {
   if (!customer) return [];
   const notes = plainPancakeNotes(customer), cards = extractCards(notes);
   return getNoteBankOptions(notes).flatMap<RegisteredCard>(bank => {
-    const bankId = banks.find(candidate => candidate.name === databaseBankNames[bank.id])?.id || null;
+    // Issuers outside the individually configured settlement banks are processed
+    // as Tarjeta Comercial (8% with its configured minimum).
+    const settlementBankName = databaseBankNames[bank.id] || "Tarjeta Comercial";
+    const bankId = banks.find(candidate => candidate.name === settlementBankName)?.id || null;
     const matches = cards.filter(card => card.bankId === bank.id);
     return matches.map(card => ({ key: `${bank.id}:${card.lastFour}`, bankKey: bank.id, bankName: bank.name, bankId, lastFour: card.lastFour }));
   });

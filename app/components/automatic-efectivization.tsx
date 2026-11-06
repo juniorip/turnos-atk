@@ -24,6 +24,8 @@ export default function AutomaticEfectivization({ operation, customer, banks, in
     return "bcp";
   };
   const selected = selectedCard || (selectedBank ? { key: `manual:${selectedBank.id}`, bankId: selectedBank.id, bankName: selectedBank.name, bankKey: bankKeyForName(selectedBank.name), lastFour: undefined } : undefined);
+  const operationBankName = selected?.bankId ? banks.find(bank => bank.id === selected.bankId)?.name || selected.bankName : selected?.bankName;
+  const operationBankKey = operationBankName ? bankKeyForName(operationBankName) : undefined;
   const detected = customerProfile(customer);
   const profile = detected || operation.customerProfile;
   const optionsKey = cards.map(card => `${card.key}:${card.bankId}`).join("|");
@@ -44,15 +46,16 @@ export default function AutomaticEfectivization({ operation, customer, banks, in
     if (operation.commissionPlan !== plan) onChange({ commissionPlan: plan });
   }, [profile, selected, operation.commissionPlan, banks, onChange]);
   const amountCents = parseAmountCents(operation.amount);
-  const delayed = selected && ["banbif", "scotiabank"].includes(selected.bankKey);
-  const quote = selected && profile && amountCents ? calculateDeposit({ amountCents, bankId: selected.bankKey, profile, timing: delayed && operation.settlementTiming === "NEXT_BUSINESS_DAY" ? "next-day" : "same-day" }) : null;
+  const delayed = operationBankKey && ["banbif", "scotiabank"].includes(operationBankKey);
+  const commercialCard = operationBankName === "Tarjeta Comercial";
+  const quote = selected && profile && amountCents && operationBankKey ? calculateDeposit({ amountCents, bankId: operationBankKey, profile, timing: delayed && operation.settlementTiming === "NEXT_BUSINESS_DAY" ? "next-day" : "same-day" }) : null;
   const money = (cents: number) => `S/ ${(cents / 100).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   return <section className="automatic-efectivization" aria-label={`Efectivización automática ${index + 1}`}>
     <div className="automatic-profile"><b>Porcentaje del cliente: {profile || "Por confirmar"}</b>{detected && <small>Obtenido de Pancake</small>}</div>
     {!detected && <label>Confirma el porcentaje del cliente<select aria-label={`Porcentaje del cliente ${index + 1}`} value={operation.customerProfile || ""} onChange={event => onChange({ customerProfile: event.target.value as CustomerProfile, profileDetected: false })}><option value="">Selecciona un porcentaje</option><option value="0.35%">0.35%</option><option value="0.5%">0.5%</option><option value="1%">1%</option></select></label>}
     {cards.length > 0 && <>
       <p className="automatic-cards-label">Tarjetas y bancos registrados</p>
-      <div className="registered-card-options">{cards.map(card => <button type="button" key={card.key} className={`registered-card-choice${selectedCard?.key === card.key ? " is-selected" : ""}`} aria-pressed={selectedCard?.key === card.key} disabled={!card.bankId} aria-label={`Usar ${card.bankName}${card.lastFour ? ` terminada en ${card.lastFour}` : " sin terminación"}`} onClick={() => onChange({ cardKey: card.key, bankId: card.bankId, settlementTiming: "NEXT_BUSINESS_DAY", commercialChannel: ["sip", "cencosud", "ripley", "diners"].includes(card.bankKey) ? operation.commercialChannel || "POS" : null })}>
+      <div className="registered-card-options">{cards.map(card => <button type="button" key={card.key} className={`registered-card-choice${selectedCard?.key === card.key ? " is-selected" : ""}`} aria-pressed={selectedCard?.key === card.key} disabled={!card.bankId} aria-label={`Usar ${card.bankName}${card.lastFour ? ` terminada en ${card.lastFour}` : " sin terminación"}`} onClick={() => onChange({ cardKey: card.key, bankId: card.bankId, settlementTiming: "NEXT_BUSINESS_DAY", commercialChannel: card.bankId && banks.find(bank => bank.id === card.bankId)?.name === "Tarjeta Comercial" ? operation.commercialChannel || "POS" : null })}>
         <BankLogo bankKey={card.bankKey} name={card.bankName} /><span>{card.lastFour ? `•••• ${card.lastFour}` : "Sin terminación en notas"}</span>{!card.bankId && <small>Banco no habilitado</small>}
       </button>)}</div>
     </>}
@@ -63,7 +66,7 @@ export default function AutomaticEfectivization({ operation, customer, banks, in
         {banks.filter(bank => ["BCP", "BBVA", "BanBif", "Scotiabank", "Interbank", "CMR", "IO", "Tarjeta Comercial"].includes(bank.name)).map(bank => <option key={bank.id} value={bank.id}>{bank.name}</option>)}
       </select></label>
     </>}
-    {selected && ["sip", "cencosud", "ripley", "diners"].includes(selected.bankKey) && <label>Canal<select value={operation.commercialChannel || "POS"} onChange={event => onChange({ commercialChannel: event.target.value as "POS" | "PAYMENT_LINK" })}><option value="POS">POS</option><option value="PAYMENT_LINK">Link de pago</option></select></label>}
+    {selected && commercialCard && <label>Canal<select value={operation.commercialChannel || "POS"} onChange={event => onChange({ commercialChannel: event.target.value as "POS" | "PAYMENT_LINK" })}><option value="POS">POS</option><option value="PAYMENT_LINK">Link de pago</option></select></label>}
     {delayed && <label>Plazo del depósito<select aria-label={`Plazo del depósito ${index + 1}`} value={operation.settlementTiming} onChange={event => onChange({ settlementTiming: event.target.value as SettlementTiming })}><option value="NEXT_BUSINESS_DAY">Siguiente día hábil</option><option value="SAME_DAY">Mismo día</option></select></label>}
     <label>Monto de la efectivización (S/)<input aria-label={`Monto de efectivización ${index + 1}`} placeholder="Monto S/" type="text" inputMode="decimal" value={operation.amount} onChange={event => onChange({ amount: event.target.value })} /></label>
     {quote?.ok ? showQuote && <div className="automatic-deposit" aria-live="polite"><p>Tarifa aplicada: <b>{quote.flatCents !== undefined ? "S/ 30.00 fijos" : `${(quote.rateBps || 0) / 100}%`}</b>{quote.minimumApplied ? ` · Mínimo ${money(quote.minimumCents)}` : ""}</p><p>Comisión: <b>{money(quote.commissionCents)}</b></p><p className="automatic-deposit-net">Se deposita: <strong>{money(quote.depositCents)}</strong></p></div> : operation.amount && <p className="automatic-quote-error" role="status">{!selected ? "Selecciona una tarjeta o banco registrado." : !profile ? "Confirma el porcentaje del cliente." : !amountCents ? "Ingresa un monto válido, con hasta dos decimales." : "El monto debe ser mayor que la comisión mínima."}</p>}
