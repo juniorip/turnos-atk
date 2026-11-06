@@ -1,11 +1,9 @@
 import { UserRole } from "@prisma/client";
-import { after } from "next/server";
 import { requireUser, errorResponse } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { fillTicketPancake, readTicketPancake } from "@/lib/ticket-pancake";
+import { readTicketPancake } from "@/lib/ticket-pancake";
 
-export const maxDuration = 60;
-export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await requireUser(UserRole.ADMIN, UserRole.WORKER, UserRole.MANAGER);
     const id = Number((await params).id);
@@ -14,16 +12,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       where: { id, ...(user.role === UserRole.ADMIN ? {} : { branchId: user.branchId ?? -1, assignedToId: user.id }) }, select: { id: true, dni: true },
     });
     if (!ticket) return Response.json({ error: "Ticket no disponible." }, { status: 404 });
-    const refresh = new URL(request.url).searchParams.get("refresh") === "1";
     const cached = await readTicketPancake(ticket);
-    if (refresh) {
-      after(() => fillTicketPancake(ticket, true));
-      return Response.json({ state: "pending" }, { status: 202, headers: { "Cache-Control": "no-store" } });
-    }
-    if (cached.state === "pending") {
-      after(() => fillTicketPancake(ticket, refresh));
-      return Response.json({ state: "pending" }, { status: 202, headers: { "Cache-Control": "no-store" } });
-    }
+    // This endpoint only reads the result cached while the ticket was waiting.
+    // Searches are intentionally started by the queue endpoints, never during
+    // an active customer visit.
     return Response.json(cached, { headers: { "Cache-Control": "no-store" } });
   } catch (error) { return errorResponse(error); }
 }

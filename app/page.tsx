@@ -3,7 +3,7 @@ import { ChangeEvent, FormEvent, PointerEvent as ReactPointerEvent, useCallback,
 import { debtCommission, effectivizacionCommission, MIN_DEBT_COMMISSION } from "@/lib/effectivizacion";
 import { LIMA_DISTRICTS } from "@/lib/lima-districts";
 import { appAsset, appFetch } from "@/lib/app-fetch";
-import PancakeRegistration, { type PancakeRegistrationStatus } from "./components/pancake-registration";
+import PancakeRegistration from "./components/pancake-registration";
 import PancakeCustomerDetails from "./components/pancake-customer-details";
 import BankLogo from "./components/bank-logo";
 import type { PancakeDniCustomer } from "@/lib/pancake";
@@ -381,92 +381,12 @@ export default function Home() {
   const operationDraftsByTicket = useRef(new Map<number, OperationDraft[]>());
   const currentOperationTicketId = useRef<number | null>(null);
   const discardedOperationDrafts = useRef(new Set<number>());
-  const [pancakeRegistration, setPancakeRegistration] = useState<{ ticketId: number; status: PancakeRegistrationStatus } | null>(null);
-  const [manualPancakeRegisteredTickets, setManualPancakeRegisteredTickets] = useState<Set<number>>(() => new Set());
-  const [pancakeStatusesByTicket, setPancakeStatusesByTicket] = useState<Record<number, PancakeRegistrationStatus>>({});
   const [pancakeCustomer, setPancakeCustomer] = useState<{ ticketId: number; customer: PancakeDniCustomer | null; checkedAt: string | null } | null>(null);
   const pancakeCustomersByTicket = useRef(new Map<number, { customer: PancakeDniCustomer | null; checkedAt: string | null }>());
-  const activeTicketsForPancake = useRef(activeTickets);
-  const pancakeStatusesForPolling = useRef(pancakeStatusesByTicket);
-  const manualTicketsForPolling = useRef(manualPancakeRegisteredTickets);
-  const currentTicketForPolling = useRef<number | null>(current?.id ?? null);
-  const pancakePollingAllowed = useRef(false);
-  const pancakeBatchInFlight = useRef(false);
-  activeTicketsForPancake.current = activeTickets;
-  pancakeStatusesForPolling.current = pancakeStatusesByTicket;
-  manualTicketsForPolling.current = manualPancakeRegisteredTickets;
-  currentTicketForPolling.current = current?.id ?? null;
-  pancakePollingAllowed.current = Boolean(data && !data.previewMode && ["WORKER", "MANAGER"].includes(data.user.role));
   const handlePancakeCustomer = useCallback((ticketId: number, customer: PancakeDniCustomer | null, checkedAt: string | null) => {
     pancakeCustomersByTicket.current.set(ticketId, { customer, checkedAt });
     if (ticketId === current?.id) setPancakeCustomer({ ticketId, customer, checkedAt });
   }, [current?.id]);
-  const handlePancakeStatus = useCallback((ticketId: number, status: PancakeRegistrationStatus) => {
-    setPancakeStatusesByTicket((previous) => previous[ticketId] === status ? previous : { ...previous, [ticketId]: status });
-    if (ticketId !== current?.id) return;
-    setPancakeRegistration({ ticketId, status });
-    if (status === "registered" || status === "registered-manual") setRegistrationRequested(false);
-  }, [current?.id]);
-  useEffect(() => {
-    let disposed = false;
-    const pollActiveTickets = async () => {
-      if (disposed || document.visibilityState !== "visible" || pancakeBatchInFlight.current || !pancakePollingAllowed.current) return;
-      if (window.sessionStorage.getItem(TAB_AUTH_KEY) !== "1") return;
-      const unresolved = activeTicketsForPancake.current
-        .filter((ticket) => ["CALLED", "IN_SERVICE"].includes(ticket.status))
-        .filter((ticket) => !manualTicketsForPolling.current.has(ticket.id))
-        .filter((ticket) => !["registered", "registered-manual", "loading"].includes(pancakeStatusesForPolling.current[ticket.id] || ""))
-        .map((ticket) => ticket.id);
-      if (!unresolved.length) return;
-      pancakeBatchInFlight.current = true;
-      try {
-        const response = await appFetch("/api/tickets/pancake-refresh-active", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ticketIds: unresolved }),
-          cache: "no-store",
-          signal: AbortSignal.timeout(55_000),
-        });
-        if (!response.ok || disposed) return;
-        const payload = await response.json();
-        for (const ticket of payload.tickets || []) {
-          if (ticket.state !== "ready" || !ticket.result) continue;
-          const result = ticket.result as { ok: boolean; found?: boolean; complete?: boolean; customer?: PancakeDniCustomer | null };
-          const status: PancakeRegistrationStatus = !result.ok
-            ? "unavailable"
-            : result.found
-              ? "registered"
-              : result.complete
-                ? "not-found"
-                : "incomplete";
-          const ticketId = Number(ticket.ticketId);
-          setPancakeStatusesByTicket((previous) => previous[ticketId] === status ? previous : { ...previous, [ticketId]: status });
-          const checkedAt = ticket.checkedAt || null;
-          pancakeCustomersByTicket.current.set(ticketId, { customer: result.customer || null, checkedAt });
-          if (currentTicketForPolling.current === ticketId) {
-            setPancakeRegistration({ ticketId, status });
-            setPancakeCustomer({ ticketId, customer: result.customer || null, checkedAt });
-            if (status === "registered") setRegistrationRequested(false);
-          }
-        }
-      } catch {
-        // A transient network failure will be retried on the next minute.
-      } finally {
-        pancakeBatchInFlight.current = false;
-      }
-    };
-    const timer = window.setInterval(() => void pollActiveTickets(), 60_000);
-    return () => { disposed = true; window.clearInterval(timer); };
-  }, []);
-  const handleManualPancakeRegisteredChange = useCallback((ticketId: number, registered: boolean) => {
-    setManualPancakeRegisteredTickets((previous) => {
-      const next = new Set(previous);
-      if (registered) next.add(ticketId);
-      else next.delete(ticketId);
-      return next;
-    });
-  }, []);
-  const canRegisterCurrentClient = pancakeRegistration?.ticketId === current?.id && pancakeRegistration?.status === "not-found";
   const [roomActionLoading, setRoomActionLoading] = useState(false);
   const [selectedRoomTicketIds, setSelectedRoomTicketIds] = useState<number[]>([]);
   const [roomAssignLoading, setRoomAssignLoading] = useState(false);
@@ -1112,13 +1032,14 @@ export default function Home() {
         preparedOperations = operations.filter(operation => operation.amount.trim() !== "").map(operation => {
           if (operation.serviceName !== "Efectivización") return { ...operation, amount: Number(operation.amount) };
           const card = cards.find(candidate => candidate.key === operation.cardKey && candidate.bankId === operation.bankId);
+          const bankId = card?.bankId ?? operation.bankId;
           const profile = customerProfile(customer) || operation.customerProfile;
           const cents = parseAmountCents(operation.amount);
-          if (!card?.bankId || !profile || !cents) throw new Error("Selecciona una tarjeta registrada, confirma el porcentaje e ingresa un monto válido.");
-          const bankName = data?.banks.find(bank => bank.id === card.bankId)?.name || "";
+          if (!bankId || !profile || !cents) throw new Error("Selecciona el banco, confirma el porcentaje e ingresa un monto válido.");
+          const bankName = data?.banks.find(bank => bank.id === bankId)?.name || "";
           const commissionPlan = profileCommissionPlan(profile, bankName);
           effectivizacionCommission(bankName, cents / 100, commissionPlan, operation.settlementTiming);
-          return { ...operation, commissionPlan, amount: cents / 100 };
+          return { ...operation, bankId, commissionPlan, amount: cents / 100 };
         }).filter(operation => operation.amount > 0);
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "Revisa las operaciones antes de finalizar.");
@@ -1135,7 +1056,7 @@ export default function Home() {
           successful,
           cancelled,
           escalation,
-          registerClient: registrationRequested && canRegisterCurrentClient,
+          registerClient: registrationRequested,
           uploadPlatform,
           operations: preparedOperations.map((operation) => ({
             ...operation,
@@ -1680,7 +1601,7 @@ export default function Home() {
               ) : (
                 <>
                   <div className="current-attention-meta"><span className="eyebrow">ATENCIÓN ACTUAL</span><span>Llegó: {new Date(current.arrivedAt).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })} · Espera: <ElapsedClock since={current.arrivedAt} until={current.startedAt} />{current.startedAt && <> · Atención: <ElapsedClock since={current.startedAt} /></>}</span></div>
-                  <div className="current-client-heading"><div className="current-client-title"><h2>{current.code} · {current.clientName}</h2><PancakeRegistration key={current.id} ticketId={current.id} manualRegistered={manualPancakeRegisteredTickets.has(current.id)} statusOverride={pancakeStatusesByTicket[current.id]} onManualRegisteredChange={handleManualPancakeRegisteredChange} onStatusChange={handlePancakeStatus} onCustomerChange={handlePancakeCustomer} /><TicketTransfer ticketId={current.id} ticketCode={current.code} onTransferred={async (advisorName) => { ++refreshGeneration.current; discardedOperationDrafts.current.add(current.id); setCurrent(null); setMessage(`${current.code} fue transferido a ${advisorName}.`); await refresh(); }} /></div><span className="current-client-dni">DNI {current.dni}</span></div>
+                  <div className="current-client-heading"><div className="current-client-title"><h2>{current.code} · {current.clientName}</h2><PancakeRegistration key={current.id} ticketId={current.id} onCustomerChange={handlePancakeCustomer} /><TicketTransfer ticketId={current.id} ticketCode={current.code} onTransferred={async (advisorName) => { ++refreshGeneration.current; discardedOperationDrafts.current.add(current.id); setCurrent(null); setMessage(`${current.code} fue transferido a ${advisorName}.`); await refresh(); }} /></div><span className="current-client-dni">DNI {current.dni}</span></div>
                   {pancakeCustomer?.ticketId === current.id && pancakeCustomer.customer && <PancakeCustomerDetails customer={pancakeCustomer.customer} checkedAt={pancakeCustomer.checkedAt} />}
                   {current.isPreferential && <span className="preferential-badge">Preferencial</span>}
                   <div className="current-service-flow">
@@ -1772,7 +1693,7 @@ export default function Home() {
                         <h3>Operaciones realizadas</h3>
                       </div>
                       <div className="inline-actions operation-actions">
-                        {(isEfectivizacion || isDebt) && canRegisterCurrentClient && <button type="button" className={`registration-state-toggle${registrationRequested ? " is-active" : ""}`} aria-pressed={registrationRequested} onClick={() => setRegistrationRequested((value) => !value)}><span className="registration-state-light" aria-hidden="true" />{registrationRequested ? "Registro activo · se enviará al finalizar" : "Activar registro del cliente"}</button>}
+                        {(isEfectivizacion || isDebt) && <button type="button" className={`registration-state-toggle${registrationRequested ? " is-active" : ""}`} aria-pressed={registrationRequested} onClick={() => setRegistrationRequested((value) => !value)}><span className="registration-state-light" aria-hidden="true" />{registrationRequested ? "Registro activo · se enviará al finalizar" : "Activar registro del cliente"}</button>}
                         <button
                           type="button"
                           className="ghost"
